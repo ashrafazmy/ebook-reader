@@ -1,12 +1,12 @@
 # Project agreement
 
-Build a single-user local EPUB reader with browser-based AI narration. Keep changes within the requested milestone. Milestone 1 is implemented; milestones 2–4 are planned.
+Build a single-user local EPUB reader with browser-based AI narration. Keep changes within the requested milestone. Milestones 1–2 are implemented; milestones 3–4 are planned.
 
 ## Stack and layout
 
 - `backend/`: Python 3.11, FastAPI, uv; pytest for behavior tests.
 - `frontend/`: React, TypeScript, Vite; npm.
-- Milestone 2: SQLite with SQLAlchemy; EbookLib and Beautiful Soup; local book storage.
+- EPUB reader: SQLite with SQLAlchemy; EbookLib and Beautiful Soup; local book storage under `backend/data/books` and database at `backend/data/reader.sqlite3` by default.
 - Milestone 3: external Voicebox HTTP service, isolated behind `VoiceboxProvider`. Default `VOICEBOX_BASE_URL=http://127.0.0.1:17493`.
 - Milestone 4: local audio cache and persisted narration progress.
 
@@ -26,6 +26,8 @@ From the repository root: `curl --fail http://127.0.0.1:8000/api/health`.
 - Track `backend/uv.lock` and `frontend/package-lock.json`. Do not commit virtual environments, dependencies, generated output, databases, books, audio, or models.
 - Add focused pytest tests for meaningful backend behavior; run tests and the frontend build for relevant changes.
 - Preserve EPUB wording and spine order. Render extracted text safely. Implement archive/upload limits and encryption rejection before enabling uploads.
+- Sections map to text-bearing HTML spine items, including non-linear items, in spine order. IDs and explicit positions are persisted; never regenerate them when reading. Font obfuscation alone is not text encryption.
+- Keep imports transactional and clean up failed files. Run one backend worker; startup recovery removes only generated files without committed records. Resolve storage paths against the repository, never the current working directory.
 - Before speech integration, inspect current Voicebox documentation, relevant source, and the running OpenAPI schema if available. Verify voice listing, generation, job status, audio retrieval, and text limits. Never invent contracts or use desktop-only playback.
 - Do not fork/copy Voicebox or install its model dependencies here. Reading must remain usable when speech is offline.
 - No authentication, Docker, cloud deployment, Redis, or separate task platform at this stage.
