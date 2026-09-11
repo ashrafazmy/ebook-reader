@@ -1,6 +1,6 @@
 # Project agreement
 
-Build a single-user local EPUB reader with browser-based AI narration. Keep changes within the requested milestone. Milestones 1–2 are implemented; milestones 3–4 are planned.
+Build a single-user local EPUB reader with browser-based AI narration. Keep changes within the requested milestone. Milestones 1–3 are implemented; milestone 3 is verified with mocks only until a live Voicebox instance is tested. Milestone 4 is planned.
 
 ## Stack and layout
 
@@ -30,5 +30,7 @@ From the repository root: `curl --fail http://127.0.0.1:8000/api/health`.
 - Keep imports transactional and clean up failed files. Run one backend worker; startup recovery removes only generated files without committed records. Resolve storage paths against the repository, never the current working directory.
 - Before speech integration, inspect current Voicebox documentation, relevant source, and the running OpenAPI schema if available. Verify voice listing, generation, job status, audio retrieval, and text limits. Never invent contracts or use desktop-only playback.
 - Do not fork/copy Voicebox or install its model dependencies here. Reading must remain usable when speech is offline.
+- Voicebox contract evidence is in `docs/voicebox-contract.md`. Use the async `VoiceboxProvider` and `/generate` queue, with `personality=false` and `effects_chain=[]`. Never submit without model readiness checks or blindly repeat ambiguous POSTs.
+- Narrations persist in SQLite; audio uses generated IDs under `DATA_DIR/audio`. Run one worker. Only known provider IDs may be reconciled automatically after restart; unresolved submissions need explicit user regeneration after checking provider history.
 - No authentication, Docker, cloud deployment, Redis, or separate task platform at this stage.
 - Distinguish implemented, planned, and mocked behavior in documentation. Do not push or create remote repositories without explicit authorization.

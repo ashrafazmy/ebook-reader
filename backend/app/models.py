@@ -50,3 +50,26 @@ class TextBlock(Base):
     kind: Mapped[str]
     heading_level: Mapped[int | None]
     text: Mapped[str] = mapped_column(Text)
+
+
+class Narration(Base):
+    __tablename__ = "narrations"
+
+    id: Mapped[str] = mapped_column(primary_key=True)
+    paragraph_id: Mapped[str] = mapped_column(ForeignKey("text_blocks.id"), index=True)
+    profile_id: Mapped[str]
+    profile_name: Mapped[str]
+    model_name: Mapped[str]
+    cache_key: Mapped[str] = mapped_column(index=True)
+    # One reusable or unresolved attempt per exact cache key. Regeneration releases it.
+    active_key: Mapped[str | None] = mapped_column(unique=True)
+    request_json: Mapped[str] = mapped_column(Text)
+    identity_json: Mapped[str] = mapped_column(Text)
+    provider_base_url: Mapped[str]
+    provider_job_id: Mapped[str | None]
+    submission_started: Mapped[bool] = mapped_column(default=False)
+    state: Mapped[str] = mapped_column(default="pending")
+    error: Mapped[str | None]
+    error_kind: Mapped[str | None]
+    audio_id: Mapped[str | None] = mapped_column(unique=True)
+    created_at: Mapped[str] = mapped_column(default=lambda: datetime.now(timezone.utc).isoformat())

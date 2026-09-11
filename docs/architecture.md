@@ -8,7 +8,7 @@ FastAPI returns HTTP 200 with `{"status":"ok"}`. This is a liveness check: it do
 
 `backend/app/` is a Python package: `__init__.py` marks it as such, `main.py` owns HTTP entry points, and `config.py` owns validated settings. `uv sync` installs the package into `backend/.venv` with its dependencies. Uvicorn loads `app.main:app` (the `app` object in `app/main.py`) and serves HTTP. FastAPI's response model defines and documents the JSON contract. pytest uses FastAPI's in-process test client to exercise that contract without starting a server.
 
-Pydantic Settings reads the root `.env` using a path relative to the source file, with environment variables taking precedence. Voicebox's base URL is configured but unused. uv and npm lockfiles record resolved dependencies. EPUB and database libraries are now installed for milestone 2; model libraries remain outside this project.
+Pydantic Settings reads the root `.env` using a path relative to the source file, with environment variables taking precedence. Voicebox's base URL is used by the milestone 3 adapter. uv and npm lockfiles record resolved dependencies. EPUB and database libraries are installed; model libraries remain outside this project.
 
 There is one repository, two application processes, and no authentication, cloud services, containers, queue server, or task platform. This foundation is intended for local loopback use. The frontend build is verified, but deployment is outside this milestone.
 
@@ -61,13 +61,38 @@ Parsing completes before database inserts. A single SQLAlchemy transaction inser
 
 The initial schema is created automatically; schema migration tooling is deferred until an actual schema change needs it. Tests generate original synthetic EPUBs in memory and use temporary data directories, including an application restart check. The sample fixture generator can write an EPUB for manual verification. Browser visual checks were not run because browser tooling was unavailable; README lists the manual checks.
 
-## Milestone 3: planned Voicebox integration
+## Milestone 3: implemented single-paragraph Voicebox integration
 
 Voicebox remains an external local service: https://github.com/jamiepine/voicebox. No source copy, fork, model installation, or model dependency belongs in this backend.
 
-Before writing the adapter, inspect the current documentation, relevant source, and running service's OpenAPI schema if available. Record the verified voice-listing, generation, job-status, audio-retrieval contracts and provider text limits. No endpoint contract has been verified or assumed in milestone 1.
+Source contracts were inspected at **v0.5.0 / `51f49dea198384b4eb6087b72c17057c6eb1c1cd`**. The local service was unavailable, so only mock-based integration has been verified. [Contract notes](voicebox-contract.md) include source links, the stale bundled-schema finding, route/payload details, model mappings, and text limits. Runtime discovery checks the running schema before submitting work.
 
-An isolated `VoiceboxProvider` will own HTTP communication using `VOICEBOX_BASE_URL` (default `http://127.0.0.1:17493`). Add speech connection status, voice selection, and generation of a short original passage. Retrieve playable audio for the browser rather than triggering desktop-only playback. Report unavailable service, missing models, timeouts, and generation failures without interrupting reading.
+`VoiceboxProvider` owns an asynchronous httpx client for the configured base URL. React calls only our API. Connection/profile discovery is separate from EPUB requests. Profile/model choices come from `/profiles` and `/models/status`, restricted to known compatible TTS combinations. Model readiness is checked before enqueueing; no download endpoint is invoked. Text is read from `TextBlock` by paragraph ID, never accepted from the browser. Heading IDs are rejected.
+
+### Flow and state
+
+1. `POST /api/narrations` takes `paragraph_id`, `profile_id`, `model_name`, and optional `regenerate`. It validates the stored paragraph and provider capabilities, then returns a persisted request (202) or an existing matching request/cache result.
+2. A lifespan-managed asyncio reconciler submits `POST /generate` with exact text and explicit settings. Voicebox's existing serial queue owns inference; this app does not run models or maintain another inference platform. HTTP work uses async I/O; SQLite operations are short transactions, with no transaction held across network calls. Up to four network reconciliations may run concurrently.
+3. Local `pending` means awaiting submission/result ID. Voicebox `generating` and `loading_model` map to local `running`. The provider also uses `generating` while queued, so the UI says queued or generating and does not claim exact queue position.
+4. The provider ID is committed as soon as submission returns. Subsequent reconciliation polls `GET /history/{id}`. Identity fields (text/profile/language/engine/model size/ID) must match before audio is attached.
+5. Provider `completed` triggers `/audio/{id}` retrieval. Bounded async download writes a `.part` file, checks WAV identification, and atomically places a generated local audio ID. Only after successful caching does the local job become `completed`. Provider failure or permanent retrieval/contract errors produce `failed` with an error category.
+6. React polls the local job status, guarded by paragraph/profile/model selection. The audio element uses native controls without autoplay; a user must start playback. Changing selections leaves the provider job intact and prevents its result being attached to a different paragraph.
+
+### Persistent data and cache
+
+The additive `narrations` table stores request ID, paragraph foreign key, selected profile/model, provider address, provider ID, submission-started marker, full payload/identity JSON, cache hash, state, error category/message, creation time, and optional unique audio ID. Existing EPUB tables are unchanged; `create_all` creates only the new table on upgrade.
+
+Cache identity includes exact text and settings, Voicebox base URL/version/backend, model name and exposed Hugging Face repository ID, profile ID and exposed profile metadata. Caching is scoped to a stored paragraph ID; identical text in two different paragraphs has separate associations. A unique nullable `active_key` and a short application lock prevent simultaneous matching creates. Pending/running requests are reused even if Regenerate is clicked. Regeneration of a terminal job releases the reusable key and creates a separate record/audio ID, preserving older audio. Sample bytes and model weight hashes are not available from the inspected API; explicit Regenerate handles unreported changes.
+
+`GET /api/narrations?paragraph_id=...` returns recent saved requests; `GET /api/narrations/{id}` reports durable state. `POST /api/narrations/{id}/retry-audio` retries only retrieval, and `/reconcile` rechecks a known provider ID. `/api/audio/{audio_id}` resolves a completed database record to a generated path under `DATA_DIR/audio` and uses Starlette FileResponse for byte-range playback/seek support (tested for 206 and 416). Provider filesystem paths are never trusted. Cached audio remains accessible while Voicebox is offline.
+
+### Failure and restart rules
+
+The submission-started marker is committed **before** the HTTP POST. No automatic retry is made for ambiguous POST timeouts/5xx/invalid responses. After restart, active rows with provider IDs are polled; active rows with a started submission but no returned ID become failed/ambiguous and require checking Voicebox history before explicit regeneration. Pending rows never submitted can proceed normally. No text-based guessing or invented idempotency key is used.
+
+Transient polling failures retain the known job for later reconciliation. Definitive provider failure is saved. Audio errors can retry download against the same provider ID. A changed base URL cannot accidentally reconcile IDs against another service. Startup removes generated partial/unreferenced audio files, so run one backend worker per data directory. As with EPUB storage, filesystem and SQLite are not a distributed transaction; startup cleanup addresses application interruptions, not hardware failure. Completed audio has no automatic eviction yet.
+
+Limits and manual live checks are in README. Only one selected paragraph is submitted; no reader-side chunking, automatic next paragraph, playback-offset persistence, LLM rewrite, or alternate speech provider is present. The provider itself can internally split long text. Designed/import-only voice profiles are not supported by this milestone's selector.
 
 ## Milestone 4: planned continuous narration
 

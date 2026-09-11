@@ -23,7 +23,7 @@ export default function App() {
         <HealthStatus />
       </header>
       {bookId ? <Reader key={bookId} bookId={bookId} /> : <Bookshelf />}
-      <footer>Your books stay on this computer. Narration is planned for a future milestone.</footer>
+      <footer>Your books stay on this computer. Paragraph narration uses your local Voicebox service.</footer>
     </main>
   );
 }
