@@ -1,5 +1,8 @@
 import { useEffect, useRef, useState } from 'react';
 import { api, errorMessage, type BookDetail } from './api';
+import { DownloadControl } from './OfflineLibrary';
+import { useOnline } from './useOnline';
+import { readProgress } from './progress';
 import { chapterTrack, usePlayback, type Progress } from './Playback';
 
 interface Job { id: string; section_id: string; profile_id: string; profile_name: string; model_name: string;
@@ -7,9 +10,10 @@ interface Job { id: string; section_id: string; profile_id: string; profile_name
 interface Voice { id: string; name: string; models: { id: string; name: string; downloaded: boolean }[] }
 
 
-export default function ChapterAudio({ book, sectionId, navigate, onStatus }: {
-  book: BookDetail; sectionId: string; navigate: (id: string) => void; onStatus: (status: string) => void;
+export default function ChapterAudio({ book, sectionId, navigate, onStatus, restoreSection = true }: {
+  book: BookDetail; sectionId: string; restoreSection?: boolean; navigate: (id: string) => void; onStatus: (status: string) => void;
 }) {
+  const online = useOnline();
   const [jobs, setJobs] = useState<Job[]>([]);
   const [voices, setVoices] = useState<Voice[]>([]);
   const [profileId, setProfileId] = useState('');
@@ -38,11 +42,11 @@ export default function ChapterAudio({ book, sectionId, navigate, onStatus }: {
 
   useEffect(() => {
     const controller = new AbortController();
-    api<Progress | null>(`/books/${book.id}/listening-progress`, { signal: controller.signal })
+    readProgress(book.id)
       .then((value) => {
         if (controller.signal.aborted) return;
         saved.current = value;
-        if (value) { setVersionId(value.version_id); if (scope.current === sectionId) navigate(value.section_id); }
+        if (value) { setVersionId(value.version_id); if (restoreSection && scope.current === sectionId) navigate(value.section_id); }
         setLoaded(true);
       }).catch((error: unknown) => { if (!controller.signal.aborted) { setError(errorMessage(error)); setLoaded(true); } });
     return () => controller.abort();
@@ -95,6 +99,7 @@ export default function ChapterAudio({ book, sectionId, navigate, onStatus }: {
   }, [loaded, jobs]);
 
   async function action(kind: 'generate' | 'replace' | 'retry' | 'cancel') {
+    if (!online) { setError('New generation and queue actions require a connection to your laptop.'); return; }
     const originalSection = sectionId;
     setBusy(true); setError('');
     try {
@@ -112,16 +117,17 @@ export default function ChapterAudio({ book, sectionId, navigate, onStatus }: {
   const inProgress = job && ['queued', 'generating', 'assembling'].includes(job.state);
   return <aside className="narration-panel" aria-label="Chapter audiobook">
     <h2>Chapter audiobook</h2>
+    {!online && <p>Offline: new generation requires a connection. Open Device downloads for saved reading and audio.</p>}
     <p>{connection}</p><button className="secondary" onClick={() => setVoiceRefresh((n) => n + 1)}>Refresh chapter voices</button>
     <div className="voice-controls">
       <label>Voice<select value={profileId} onChange={(e) => setProfileId(e.target.value)}><option value="">Choose voice</option>{voices.map((v) => <option key={v.id} value={v.id}>{v.name}</option>)}</select></label>
       <label>Model<select value={modelId} onChange={(e) => setModelId(e.target.value)}><option value="">Choose model</option>{voice?.models.map((m) => <option key={m.id} value={m.id}>{m.name}{m.downloaded ? '' : ' — not downloaded'}</option>)}</select></label>
     </div>
     <div className="narration-actions">
-      <button disabled={busy || !!inProgress || !model?.downloaded} onClick={() => void action('generate')}>Generate chapter</button>
-      <button className="secondary" disabled={busy || !!inProgress || !model?.downloaded} onClick={() => void action('replace')}>Generate replacement</button>
-      {inProgress && <button disabled={busy} onClick={() => void action('cancel')}>Cancel remaining work</button>}
-      {job && ['failed', 'cancelled'].includes(job.state) && <button disabled={busy} onClick={() => void action('retry')}>Retry / resume remaining work</button>}
+      <button disabled={!online || busy || !!inProgress || !model?.downloaded} onClick={() => void action('generate')}>Generate chapter</button>
+      <button className="secondary" disabled={!online || busy || !!inProgress || !model?.downloaded} onClick={() => void action('replace')}>Generate replacement</button>
+      {inProgress && <button disabled={!online || busy} onClick={() => void action('cancel')}>Cancel remaining work</button>}
+      {job && ['failed', 'cancelled'].includes(job.state) && <button disabled={!online || busy} onClick={() => void action('retry')}>Retry / resume remaining work</button>}
     </div>
     {job && <p role="status">{job.state} · {job.completed} of {job.total} chunks completed · {job.profile_name}</p>}
     {job?.error && <p className="error" role="alert">{job.error}</p>}
@@ -130,6 +136,7 @@ export default function ChapterAudio({ book, sectionId, navigate, onStatus }: {
     <label>Saved audio version<select value={versionId} onChange={(e) => setVersionId(e.target.value)}><option value="">No version selected</option>{sectionJobs.filter((j) => j.state === 'ready').map((j) => <option key={j.id} value={j.id}>{j.profile_name} · {j.model_name} · {j.id.slice(0, 8)}</option>)}</select></label>
     {!activeVersion && <p>No saved audio is available for this chapter yet. Reading still works.</p>}
     {activeVersion && <button onClick={() => void playback.loadChapter(book, activeVersion)}>{playback.track?.id === activeVersion.id ? 'Loaded in player' : 'Load chapter in player'}</button>}
+    {activeVersion && <DownloadControl book={book} version={activeVersion} />}
     <p className="help">Saved chapter files play without Voicebox. A replacement leaves previous versions available. Restoring a position never starts playback.</p>
   </aside>;
 }

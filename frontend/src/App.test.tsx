@@ -58,7 +58,7 @@ it.each([360, 1280])('renders chapter-only bookshelf/reader controls at a %ipx w
   vi.stubGlobal('innerWidth', width);
   await mount(); expect(host.textContent).not.toMatch(/Paragraph narration|Narrate this paragraph|Generate narration/);
   await navigate('#book=book');
-  expect(button('Generate chapter')).toBeTruthy(); expect(host.querySelector('summary')?.textContent).toContain('Chapter audio');
+  expect(button('Generate chapter')).toBeTruthy(); expect(host.querySelector('.generation-details > summary')?.textContent).toContain('Chapter audio');
   expect(host.textContent).not.toMatch(/Paragraph narration|Narrate this paragraph|Generate narration/);
   expect(host.querySelectorAll('article button, article audio, [aria-pressed]')).toHaveLength(0);
   expect(Array.from(host.querySelectorAll('article p')).map((p) => p.textContent)).toEqual(blocks.slice(1).map((p) => p.text));
@@ -75,10 +75,10 @@ it('keeps chapter generation, queued status, cancellation and retry wired to cha
   expect(button('Generate chapter').disabled).toBe(false); await click(button('Generate chapter'));
   const create = fetchMock.mock.calls.find(([url, options]) => url === '/api/chapters' && options?.method === 'POST')!;
   expect(JSON.parse(create[1].body)).toEqual({ section_id: 'section', profile_id: 'voice', model_name: 'model', replace: false });
-  expect(host.querySelector('summary')?.textContent).toContain('queued · 0 of 2');
+  expect(host.querySelector('.generation-details > summary')?.textContent).toContain('queued · 0 of 2');
   expect(button('Generate chapter').disabled).toBe(true);
   await click(button('Cancel remaining work')); expect(host.textContent).toContain('cancelled');
-  await click(button('Retry / resume remaining work')); expect(host.querySelector('summary')?.textContent).toContain('queued');
+  await click(button('Retry / resume remaining work')); expect(host.querySelector('.generation-details > summary')?.textContent).toContain('queued');
 });
 
 it('restores one cached chapter player with Voicebox offline and retains it across real app navigation', async () => {

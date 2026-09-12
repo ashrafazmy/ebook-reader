@@ -35,3 +35,7 @@ models/
 *.gguf
 .DS_Store
 *.log
+
+.certs/
+playwright-report/
+test-results/

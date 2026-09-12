@@ -2,11 +2,11 @@ import { createElement, useEffect, useRef, useState } from 'react';
 import { api, errorMessage, type BookDetail, type SectionDetail } from './api';
 import ChapterAudio from './ChapterAudio';
 
-export default function Reader({ bookId }: { bookId: string }) {
+export default function Reader({ bookId, requestedSection }: { bookId: string; requestedSection?: string | null }) {
   const [book, setBook] = useState<BookDetail | null>(null);
   const [section, setSection] = useState<SectionDetail | null>(null);
   const [index, setIndex] = useState(0);
-  const [fontSize, setFontSize] = useState(20);
+  const [fontSize, setFontSize] = useState(16);
   const [bookError, setBookError] = useState('');
   const [sectionError, setSectionError] = useState('');
   const [attempt, setAttempt] = useState(0);
@@ -22,6 +22,10 @@ export default function Reader({ bookId }: { bookId: string }) {
     return () => controller.abort();
   }, [bookId, attempt]);
 
+  useEffect(() => {
+    const position = book?.sections.findIndex((s) => s.id === requestedSection) ?? -1;
+    if (position >= 0) setIndex(position);
+  }, [book, requestedSection]);
   const sectionId = book?.sections[index]?.id;
   useEffect(() => {
     if (!sectionId) return;
@@ -46,7 +50,7 @@ export default function Reader({ bookId }: { bookId: string }) {
   return (
     <>
       <a className="back-link" href="#">← Back to bookshelf</a>
-      {bookError ? <div role="alert" className="error"><p>{bookError}</p><button onClick={() => setAttempt((value) => value + 1)}>Retry book</button></div>
+      {bookError ? <div role="alert" className="error"><p>{bookError}</p><p><a href="#downloads">Open downloaded chapters instead.</a></p><button onClick={() => setAttempt((value) => value + 1)}>Retry book</button></div>
         : !book ? <p role="status">Opening book…</p> : <>
           <h1 className="reader-title">{book.title}</h1><p className="author">{book.author}</p>
           <div className="reader-controls">
@@ -65,7 +69,7 @@ export default function Reader({ bookId }: { bookId: string }) {
             <button disabled={index === book.sections.length - 1} onClick={() => navigate(index + 1)}>Next →</button>
           </nav>
           <details className="generation-details"><summary>Chapter audio · {chapterStatus}</summary>
-          <ChapterAudio onStatus={setChapterStatus} book={book} sectionId={sectionId!} navigate={(id) => {
+          <ChapterAudio restoreSection={!requestedSection} onStatus={setChapterStatus} book={book} sectionId={sectionId!} navigate={(id) => {
             const position = book.sections.findIndex((item) => item.id === id);
             if (position >= 0) navigate(position);
           }} />

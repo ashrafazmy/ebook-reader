@@ -59,7 +59,7 @@ export default function Bookshelf() {
       {notice && <p role="status">{notice}</p>}
       {uploadError && <p role="alert" className="error">{uploadError}</p>}
       {loading ? <p role="status">Loading your bookshelf…</p> : error ? (
-        <div className="error" role="alert"><p>{error}</p><button onClick={() => setAttempt((value) => value + 1)}>Retry bookshelf</button></div>
+        <div className="error" role="alert"><p>{error}</p><p><a href="#downloads">Open device downloads for offline reading and listening.</a></p><button onClick={() => setAttempt((value) => value + 1)}>Retry bookshelf</button></div>
       ) : books.length === 0 ? (
         <section className="empty"><h2>Your next chapter starts here.</h2><p>No books yet. Use Upload EPUB to add a book, then choose a chapter to read or narrate.</p></section>
       ) : (

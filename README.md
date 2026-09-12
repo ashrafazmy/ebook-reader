@@ -2,9 +2,11 @@
 
 A single-user web application being built for reading unencrypted EPUBs and listening to AI narration locally.
 
-**Implemented: milestones 1–4, 5A, and 5A.1.** EPUB upload and reading, chapter-only narration, saved chapter audiobooks, persistent listening position, responsive controls, and opt-in home Wi-Fi access. Production code uses real HTTP calls; mocks are used only in tests.
+**Implemented: milestones 1–4, 5A, 5A.1, and 5B.** EPUB upload and reading, chapter-only narration, saved chapter audiobooks, persistent listening position, responsive controls, home Wi-Fi access, and a production PWA with explicit device chapter downloads. Production code uses real HTTP calls; mocks are used only in tests.
 
 Voicebox/Kokoro chapter generation was **verified live on 2026-09-12**, alongside mock-based tests. Browser playback and automatic continuation remain manual checks. Books, text, jobs, cached chunks, chapter files, and listening position persist across restarts. Saved audio and reading remain available without Voicebox.
+
+For installation and network-independent reading/listening, use the **[5B private HTTPS and offline testing guide](docs/pwa-testing.md)**. Ordinary LAN HTTP development remains online-only. Only chapters explicitly marked **Available offline** are available without the laptop.
 
 ## Prerequisites
 
@@ -198,9 +200,9 @@ Failed/interrupted chapter work is handled through **Retry / resume remaining wo
 4. When ready, select a **Saved audio version**, click **Load chapter in player**, then press the bottom player's native **Play** button. Use its pause/seek controls and the playback-speed selector. Position is saved every five seconds during playback, on pause/seek/speed changes, and best-effort during page exit/navigation.
 5. Refresh or reopen the book: the saved chapter/audio version, offset, and speed are restored, **without autoplay**. Periodic saves limit loss on an abrupt browser crash to roughly five seconds; exit saves cannot be guaranteed after a force quit.
 6. After user-started playback reaches the end, the player continues to the next section's ready audio with the same profile/model, if available. Otherwise it explains the missing audio. Browser autoplay restrictions may require another Play click. The bottom player’s Previous/Next chapter buttons select adjacent ready audio. Reading navigation is independent and never replaces the active audio.
-7. Close Voicebox after the chapter is ready and continue listening. Keep our FastAPI backend running, and keep Vite running when using this development setup; this is not a PWA or a phone download feature.
+7. Close Voicebox after the chapter is ready and continue listening. Keep our FastAPI backend running, and keep Vite running when using this development setup; server playback still needs the laptop. For network-independent playback, explicitly download the chapter using milestone 5B.
 
-**Saved audio version** lets you choose earlier ready recordings; press **Load chapter in player** to explicitly switch audio. Generation uses a snapshot of profile, engine/model, language, and all generation settings. Changing the selectors does not mutate a running job. If the exposed profile/model identity changes mid-generation, remaining submissions fail clearly instead of mixing voices. Use **Generate replacement** for an intentionally changed profile; older ready versions remain playable until and after the replacement succeeds. The player does not switch away from a selected old version mid-playback.
+**Saved audio version** lets you choose earlier ready recordings; press **Load chapter in player** to explicitly switch audio. Generation uses a snapshot of profile, engine/model, language, and all generation settings. Changing the selectors does not mutate a running job. If the exposed profile/model identity changes mid-generation, remaining submissions fail clearly instead of mixing voices. Use **Generate replacement** for an intentionally changed profile; older ready versions remain playable until and after the replacement succeeds. The player does not switch away from a selected old version mid-playback. Device downloads remain tied to that exact version after server replacement.
 
 Ordinary Generate clicks reuse a matching chapter job and compatible cached chunks, including whole-paragraph audio generated in milestone 3. Generate replacement explicitly creates fresh chunk recordings (already in-flight matching work can still be shared). Repeated clicks while a matching job runs do not enqueue duplicates.
 
@@ -289,7 +291,7 @@ One shared player stays mounted when you open/close these controls, choose readi
 
 The bottom player uses native play/pause and seeking, plus speed and chapter controls. Its measured height reserves reading space, including the phone safe area; in short landscape viewports its controls can scroll. Book text wraps and retains adjustable size. Loading/restoring audio does not autoplay; automatic next-chapter playback remains subject to browser permission and displays a message if rejected. The native player reflects actual browser playback state rather than an optimistic “playing” label.
 
-Chapter progress saves to SQLite every five seconds during playback, on pause/seek/speed change, and best-effort on hiding/leaving the page. A local-storage book ID is only a resume hint; the backend is the source of the saved version/position/speed. Opening a book restores its saved position without replacing audio already loaded. Refreshing reloads the media; it cannot preserve uninterrupted sound. Force quits and OS suspension can prevent the final save. A phone and laptop share the latest saved position per book; simultaneous playback can overwrite it.
+Chapter progress saves to SQLite every five seconds during playback, on pause/seek/speed change, and best-effort on hiding/leaving the page. A local-storage book ID is only a resume hint; the backend and device IndexedDB synchronize the saved version/position/speed under the 5B rules below. Opening a book restores its saved position without replacing audio already loaded. Refreshing reloads the media; it cannot preserve uninterrupted sound. Force quits and OS suspension can prevent the final save. A phone and laptop share the latest saved position per book; simultaneous playback can overwrite it.
 
 ### Verification and manual phone checks
 
@@ -334,3 +336,27 @@ Manual checks on desktop and phone:
 6. At narrow phone and desktop widths, verify readable text and accessible chapter controls. Actual rotation, background, and screen-lock checks remain the separate 5A device checklist above.
 
 PWA/offline downloads, hosting, and direct Kokoro integration remain outside this change. Voicebox stays the external speech provider.
+
+
+## Milestone 5B: installable app and explicit device downloads
+
+The production build includes a manifest, PNG icons, and a service worker that caches only its emitted app-shell assets. Development assets and API responses are not precached. Chapter text, book/section metadata, audio version and WAV are saved in IndexedDB only after **Download for offline**. A single storage transaction publishes the audio and Ready metadata together. Downloading/interrupted, failed, ready and removed states are visible; removal affects the device only. Previous server versions and all backend generation machinery remain intact.
+
+Use **Device downloads** to read downloaded chapters and load their audio into the existing one-player controls. WAV Blob URLs support local seeking. Progress is written locally first and reconciled on reconnection/foreground entry and periodically while visible. Same-version conflicts use edit timestamps, not furthest position; independently changed versions require a choice. Updates wait until all reader windows close, so they never force a playback reload. Missing/evicted downloads require reconnecting and downloading again.
+
+The production preview has a loopback API proxy and an opt-in private HTTPS mode. From `frontend/`, run `npm ci`, `npm run build`, then `npm run preview:https` after the certificate setup. The phone URL is **`https://<MAC_WIFI_IP>:4173`**. Keep the address stable; browser storage is per origin. Read the **[exact Mac certificate setup, phone trust/install steps, conflict rules and airplane-mode checklist](docs/pwa-testing.md)** before testing. Do not bypass certificate warnings. No CA or device trust settings were changed automatically.
+
+New test-only dependencies are fake-indexeddb and Playwright. Runtime dependencies and SQLite schema are unchanged. `npm test` covers downloads and progress alongside the existing player/reader tests; `npm run test:e2e` tests the built application with Chromium and mocked API data. The 58 backend tests still cover generation, queue, cancellation/retry, server audio seeking, cache reuse and restart recovery. Browser tests use synthetic silent audio; they do not verify Voicebox generation or audible narration on a phone.
+
+
+**5B verification completed on 2026-09-13:** 31 frontend unit/DOM tests, 5 Chromium production-browser tests, all 58 backend tests, and the production build passed. Browser checks covered explicit download/retry/deletion, offline text and local WAV decoding/seeking, saved speed/offset after refresh, reconnection sync, a full browser-process restart with networking disabled, and update waiting/activation with downloaded content retained. Overflow checks passed at 320, 390, 430 and 1280 CSS pixels; 320/1280 screenshots were reviewed. Browser audio was a synthetic silent WAV and server responses were mocked. Actual phone installation, trusted LAN HTTPS, iOS/Android eviction behavior, audible Voicebox narration and lock-screen playback remain manual checks in the linked guide. The backend suite retains two upstream test-client deprecation warnings.
+
+### Download and player improvements
+
+Downloads now show actual received bytes, percentage/total when known, and separate verification/saving states. Activity remains visible when navigating away. Wait for **Available offline** before disconnecting; interrupted or failed transfers can be retried from **Device downloads**.
+
+The player displays the playing chapter first and its book separately. Tap the title to expand it. **Downloaded chapters** lists saved versions in reading order, with duration when known. Selection opens local text, preserves play/pause intent and restores that audio version's saved position. Previous/Next target the adjacent section, and explain gaps instead of skipping them. Previously, audio navigation did not change the reader route; this is now corrected. Existing server audio and chapter generation are retained.
+
+Run `npm test`, `npm run build`, and `npm run test:e2e` from `frontend/`; run `uv run pytest` from `backend/`. Follow the additional phone checks in [the PWA guide](docs/pwa-testing.md#download-and-player-regression-checklist). Actual installed-phone airplane-mode and audible playback checks remain manual.
+
+Follow-up verification: stream tests cover known/unknown totals, partial transfer failure and retry. The multi-chapter Chromium test covers adjacent chapters, gaps, exact local text, per-version position/speed, playing/paused selection, rejected playback, missing Blobs and long titles. These use synthetic audio and simulated offline conditions, not an installed phone in airplane mode.
