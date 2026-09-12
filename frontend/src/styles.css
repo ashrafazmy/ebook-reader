@@ -56,17 +56,12 @@ button:disabled { cursor: default; }
 @media (max-width: 520px) { main { padding: 24px 16px; } .shelf-heading { margin-top: 40px; } .reader-controls { display: block; } .font-control { margin-top: 16px; } }
 .narration-panel { padding: 20px; border: 1px solid #c9d3ca; border-radius: 12px; margin: 24px 0; background: #fffdf9; }
 .narration-panel h2 { margin-bottom: 8px; }
-.selected-preview { margin: 16px 0; max-height: 8em; overflow: auto; white-space: pre-line; border-left: 3px solid #698574; padding-left: 16px; }
 .voice-controls { display: flex; flex-wrap: wrap; gap: 16px; }
 .voice-controls label { flex: 1; min-width: min(220px, 100%); }
 .narration-actions { display: flex; flex-wrap: wrap; gap: 10px; margin-top: 20px; }
 .secondary { color: #273c36; background: transparent; border: 1px solid #9daaa0; }
 .help { font-size: .85rem; color: #59665c; }
 audio { display: block; width: 100%; margin-top: 16px; }
-.paragraph { margin-bottom: 1.25em; padding: 12px; border-left: 3px solid transparent; }
-.paragraph.selected { border-color: #427453; background: #e7eee3; }
-.paragraph p { margin-bottom: .25em; }
-.narrate-paragraph { font-family: system-ui, sans-serif; font-size: .7em; color: #365c43; background: transparent; padding: 4px 0; text-decoration: underline; }
 
 /* The single app-level player reserves its measured height, including safe areas. */
 html { scroll-padding-bottom: calc(var(--player-height, 0px) + 24px); }
@@ -84,7 +79,6 @@ input[type="checkbox"] { width: 24px; height: 24px; vertical-align: middle; marg
 .dot { flex-shrink: 0; }
 .section-navigation > * { min-width: 0; }
 .section-navigation > span { flex-shrink: 0; }
-.narrate-paragraph { padding: 10px 4px; font-size: 16px; }
 .reading-content { scroll-margin-top: 16px; }
 .generation-details { margin: 20px 0; }
 .generation-details > summary { display: list-item; cursor: pointer; padding: 12px; border: 1px solid #9daaa0; border-radius: 8px; font-weight: 650; }
@@ -110,7 +104,6 @@ input[type="checkbox"] { width: 24px; height: 24px; vertical-align: middle; marg
   .narration-actions > button { flex: 1 1 100%; }
   .section-navigation { gap: 8px; }
   .section-navigation button { padding: 10px; }
-  .paragraph { padding: 8px 0 8px 8px; }
   .reader-title { margin-top: 16px; }
   .book-grid { gap: 12px; }
 }

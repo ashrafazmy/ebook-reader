@@ -39,10 +39,10 @@ it('keeps the same player and source across page navigation', async () => {
   expect(pauseMock).not.toHaveBeenCalled();
 });
 it('pauses for explicit replacement and ignores background restoration while audio is selected', async () => {
-  await load(); await act(async () => playback.load({ id: 'paragraph', url: '/api/audio/p1', title: 'Paragraph' }));
+  await load(); await act(async () => playback.load(chapterTrack(book, { ...version, id: 'replacement', audio_url: '/api/chapter-audio/replacement' })));
   expect(host.querySelectorAll('audio')).toHaveLength(1); expect(pauseMock).toHaveBeenCalledTimes(1);
   await act(async () => playback.load(chapterTrack(book, version), true));
-  expect(player().getAttribute('src')).toBe('/api/audio/p1');
+  expect(player().getAttribute('src')).toBe('/api/chapter-audio/replacement');
 });
 it('restores saved version, position and speed without autoplay or writing untouched progress', async () => {
   localStorage.setItem('reader-listening-book', book.id);
@@ -73,13 +73,13 @@ it('explains missing next audio without submitting generation', async () => {
   expect(host.textContent).toContain('no ready audio'); expect(player().getAttribute('src')).toBe(version.audio_url);
   expect(fetchMock.mock.calls.some((call) => call[1]?.method === 'POST')).toBe(false);
 });
-it('ignores a delayed next-chapter response after the user selects paragraph audio', async () => {
+it('ignores a delayed next-chapter response after the user selects a different chapter version', async () => {
   let resolve!: (value: { ok: boolean; json: () => Promise<unknown> }) => void;
   fetchMock.mockImplementation((url) => url.includes('chapters?') ? new Promise((done) => { resolve = done; }) : Promise.resolve({ ok: true, json: async () => null }));
   await load(); await fire(player(), 'play'); await fire(player(), 'ended');
-  await act(async () => playback.load({ id: 'paragraph', url: '/api/audio/p1', title: 'Paragraph' }));
+  await act(async () => playback.load(chapterTrack(book, { ...version, id: 'replacement', audio_url: '/api/chapter-audio/replacement' })));
   await act(async () => resolve({ ok: true, json: async () => [nextVersion] }));
-  expect(player().getAttribute('src')).toBe('/api/audio/p1'); expect(playMock).not.toHaveBeenCalled();
+  expect(player().getAttribute('src')).toBe('/api/chapter-audio/replacement'); expect(playMock).not.toHaveBeenCalled();
 });
 it('reports a failed progress save and retries against the same audio version', async () => {
   await load(); await fire(player(), 'pointerdown'); player().currentTime = 12;

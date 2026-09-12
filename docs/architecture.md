@@ -61,7 +61,9 @@ Parsing completes before database inserts. A single SQLAlchemy transaction inser
 
 The initial schema is created automatically; schema migration tooling is deferred until an actual schema change needs it. Tests generate original synthetic EPUBs in memory and use temporary data directories, including an application restart check. The sample fixture generator can write an EPUB for manual verification. Browser visual checks were not run because browser tooling was unavailable; README lists the manual checks.
 
-## Milestone 3: implemented single-paragraph Voicebox integration
+## Milestone 3: retained Voicebox narration foundation
+
+The paragraph UI introduced in milestone 3 was removed in 5A.1. The following describes the retained backend contract and machinery used by chapter chunks.
 
 Voicebox remains an external local service: https://github.com/jamiepine/voicebox. No source copy, fork, model installation, or model dependency belongs in this backend.
 
@@ -73,10 +75,10 @@ Source contracts were inspected at **v0.5.0 / `51f49dea198384b4eb6087b72c17057c6
 
 1. `POST /api/narrations` takes `paragraph_id`, `profile_id`, `model_name`, and optional `regenerate`. It validates the stored paragraph and provider capabilities, then returns a persisted request (202) or an existing matching request/cache result.
 2. A lifespan-managed asyncio reconciler submits `POST /generate` with exact text and explicit settings. Voicebox's existing serial queue owns inference; this app does not run models or maintain another inference platform. HTTP work uses async I/O; SQLite operations are short transactions, with no transaction held across network calls. Up to four network reconciliations may run concurrently.
-3. Local `pending` means awaiting submission/result ID. Voicebox `generating` and `loading_model` map to local `running`. The provider also uses `generating` while queued, so the UI says queued or generating and does not claim exact queue position.
+3. Local `pending` means awaiting submission/result ID. Voicebox `generating` and `loading_model` map to local `running`. The provider also uses `generating` while queued, so the internal state does not claim an exact provider queue position.
 4. The provider ID is committed as soon as submission returns. Subsequent reconciliation polls `GET /history/{id}`. Identity fields (text/profile/language/engine/model size/ID) must match before audio is attached.
 5. Provider `completed` triggers `/audio/{id}` retrieval. Bounded async download writes a `.part` file, checks WAV identification, and atomically places a generated local audio ID. Only after successful caching does the local job become `completed`. Provider failure or permanent retrieval/contract errors produce `failed` with an error category.
-6. React polls the local job status, guarded by paragraph/profile/model selection. The audio element uses native controls without autoplay; a user must start playback. Changing selections leaves the provider job intact and prevents its result being attached to a different paragraph.
+6. The chapter coordinator observes these narration rows, mirrors chunk state, and assembles completed audio. React polls chapter status and loads only final chapter versions into the shared player. The former paragraph React panel is deleted.
 
 ### Persistent data and cache
 
@@ -96,7 +98,7 @@ Limits and manual live checks are in README. The paragraph endpoint still submit
 
 ## Milestone 4: implemented chapter audiobooks
 
-`chapters.py` coordinates persistent chapter plans; `chapter_audio.py` owns deterministic source spans and WAV assembly. `ChapterAudio.tsx` provides chapter generation and saved-version selection; `Playback.tsx` now owns shared listening controls (milestone 5A). Existing paragraph generation and its durable cache remain intact.
+`chapters.py` coordinates persistent chapter plans; `chapter_audio.py` owns deterministic source spans and WAV assembly. `ChapterAudio.tsx` provides chapter generation and saved-version selection; `Playback.tsx` now owns shared listening controls (milestone 5A). The shared narration service and its durable cache remain intact; individual paragraph controls were removed in 5A.1.
 
 ### Mapping and data model
 
@@ -142,7 +144,7 @@ Frames are streamed in chunk order to a `.part` file, with per-chunk audio range
 
 The player chooses a saved version independently of generation controls, keeping previous audio available through replacements. Position saves occur every five seconds while playing, on pause/seek/speed change, and best-effort at navigation/page exit. SQLite UPSERT accepts only newer timestamps, protecting against out-of-order requests; audio version ownership and duration bounds are validated. The latest save wins across tabs.
 
-Restoration selects the saved section/version and sets offset/speed without autoplay. After user-started playback ends, continuation chooses the next ready section in spine order with the same profile/model. If unavailable, an explanation is shown; no generation is automatically requested. Browser playback policies may still require a Play click. Chapter/paragraph selection guards prevent stale results from attaching to another selection.
+Restoration selects the saved section/version and sets offset/speed without autoplay. After user-started playback ends, continuation chooses the next ready section in spine order with the same profile/model. If unavailable, an explanation is shown; no generation is automatically requested. Browser playback policies may still require a Play click. Chapter/version selection guards prevent stale results from attaching to another selection.
 
 ### Verification and boundaries
 
@@ -153,14 +155,27 @@ Saved audio needs our backend (and Vite during development), but no Voicebox con
 
 ## Milestone 5A: responsive UI and opt-in LAN access
 
-`App.tsx` wraps all page navigation in `PlaybackProvider`. A single native audio element belongs to this provider rather than to a reader or generation panel. Source selection is explicit; returning to the bookshelf, changing reading sections, and collapsing native `details` elements do not replace the element/source. Paragraph and chapter playback share it. No backend schema, queue, generation contract, or audio cache changes were needed.
+`App.tsx` wraps all page navigation in `PlaybackProvider`. A single native audio element belongs to this provider rather than to a reader or generation panel. Source selection is explicit; returning to the bookshelf, changing reading sections, and collapsing native `details` elements do not replace the element/source. Only chapter audio versions can be loaded (5A.1); there is no paragraph playback path. No backend schema, queue, generation contract, or audio cache changes were needed.
 
 `ChapterAudio` continues polling existing persistent jobs even when its disclosure is closed, and reports state/count in the summary. It restores saved reading section/version once per book without replacing existing active audio. Explicit Load actions fetch the latest backend progress. `Playback` owns periodic and lifecycle saves, exact audio-version selection, and automatic next-ready audio lookup in spine order for the same voice/model. Asynchronous next/load results are guarded against newer selections. It never automatically generates missing audio. Native controls reflect actual paused/playing/buffering state; rejected programmatic continuation has a visible message. Native dialogs are unnecessary: chapter selection uses a native select, and panels use details/summary with normal keyboard focus.
 
-Resume stores only a last-listened book ID in optional browser local storage. SQLite remains authoritative for offset, version and speed. A page refresh on the bookshelf can restore that book’s saved audio, while a direct reader URL restores its own book. Restoration is passive; no sound starts. Progress writes use monotonically increasing timestamps as before, and skip untouched metadata seeks. Saves run every five seconds during playback, on pause/seek/rate changes, and best-effort on pagehide/visibilitychange. Multiple tabs/devices remain independent players and share the latest backend position; 5A adds no cross-device playback lock. Paragraph playback position remains ephemeral.
+Resume stores only a last-listened book ID in optional browser local storage. SQLite remains authoritative for offset, version and speed. A page refresh on the bookshelf can restore that book’s saved audio, while a direct reader URL restores its own book. Restoration is passive; no sound starts. Progress writes use monotonically increasing timestamps as before, and skip untouched metadata seeks. Saves run every five seconds during playback, on pause/seek/rate changes, and best-effort on pagehide/visibilitychange. Multiple tabs/devices remain independent players and share the latest backend position; 5A adds no cross-device playback lock.
 
 CSS reserves the fixed bottom player’s measured height with ResizeObserver and safe-area insets. The dock can scroll in short landscape windows. Controls use minimum 44px targets where controlled by our CSS, 16px form text, visible focus, wrapping labels, and single-column narrow-screen forms. Browser-native media control dimensions remain browser-owned. Generation disclosure state and reader font size are session UI state, not new persisted records.
 
 Network path: phone → Vite LAN port 5173 → `/api` proxy → FastAPI loopback port 8000 → Voicebox loopback port 17493 (only when generating). Relative media URLs also pass through Vite, including Range headers. The `dev:lan` command overrides only Vite’s bind address; the default dev/preview binding and Vite host/CORS restrictions remain intact. LAN access is opt-in on a trusted network; any reachable device can access this unauthenticated app through the proxy. It is not a deployment or secure-origin PWA environment.
 
 Verification: eight jsdom/media-mock tests cover shared player lifecycle and persistence/continuation, alongside the existing 58 backend tests and frontend build. The LAN frontend HTML and proxied health response were checked from the Mac via its LAN address on temporary port 5174. No real-browser layout, mobile emulation, actual phone playback, backgrounding, or lock-screen checks were available; README supplies the device checklist. Prior live Voicebox evidence remains milestone 4 evidence. No new narration was necessary for this UI milestone.
+
+
+## Milestone 5A.1: chapter-only narration interface
+
+`Reader.tsx` now renders source paragraphs directly as semantic `p` elements, retaining `id=block-<id>` and `data-block-id` for each persisted block. No source strings, IDs, ordering, chunk spans, or EPUB parsing change. Native selection/copying remains available. The removed selected-paragraph highlight served individual narration only; there was no chapter-playback text highlight to preserve.
+
+`NarrationPanel.tsx`, its request/polling code, selected-paragraph state, disclosure, narration buttons, and paragraph-only CSS are removed. `ChapterAudio.tsx` keeps voice/model selection, Generate/replacement, progress, queued status, cancellation, retry, and saved-version selection. The shared player requires chapter metadata, keeps a single media element mounted across app navigation, and retains seeking, speed, previous/next, ordered continuation, and backend progress restoration. It does not replace audio merely because the reader changes sections.
+
+Backend dependencies inspected: `ChapterService` takes the lifespan-managed `NarrationService`, uses its provider and lock, and creates/reuses `Narration` rows by the existing cache key. `ChapterChunk.narration_id` links each chunk to provider IDs, errors, and cached audio; assembly reads those files. Retry and startup recovery depend on the same rows. Therefore the shared service, models, cache format, and all audio remain intact. No migration, deletion, or queue change is needed.
+
+Legacy paragraph HTTP routes are not called by chapter scheduling or the new frontend. They remain intentionally for compatibility and inspecting/recovering old jobs; regression tests also use them to seed cache entries and verify cross-version reuse. Their router includes `/voicebox/profiles`, required by chapter controls. Keeping the router preserves those active routes and avoids expanding a UI simplification into API retirement. Existing pending legacy requests still reconcile normally. Final chapter files are served independently of Voicebox by the existing chapter-audio endpoint.
+
+Verification for 5A.1: 58 existing backend tests and 12 frontend jsdom tests plus the production build. New app-level tests verify absent paragraph controls, unchanged/selectable text and IDs, chapter generation/cancel/retry wiring, and cached chapter restoration/navigation with mocked offline Voicebox. Setting window widths to 360/1280 verifies the same DOM path, not CSS layout. Browser tooling was unavailable; visual desktop/mobile checks, audible playback, and live provider calls were not run for this change. README lists the manual checks. Prior milestone live evidence is unchanged.

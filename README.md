@@ -2,7 +2,7 @@
 
 A single-user web application being built for reading unencrypted EPUBs and listening to AI narration locally.
 
-**Implemented: milestones 1–4 and 5A.** EPUB upload and reading, paragraph narration, saved chapter audiobooks, and persistent listening position, responsive controls, and opt-in home Wi-Fi access. Production code uses real HTTP calls; mocks are used only in tests.
+**Implemented: milestones 1–4, 5A, and 5A.1.** EPUB upload and reading, chapter-only narration, saved chapter audiobooks, persistent listening position, responsive controls, and opt-in home Wi-Fi access. Production code uses real HTTP calls; mocks are used only in tests.
 
 Voicebox/Kokoro chapter generation was **verified live on 2026-09-12**, alongside mock-based tests. Browser playback and automatic continuation remain manual checks. Books, text, jobs, cached chunks, chapter files, and listening position persist across restarts. Saved audio and reading remain available without Voicebox.
 
@@ -162,11 +162,11 @@ Lockfiles remain in version control; install dependencies with `uv sync --locked
 2. In Voicebox, configure a preset or cloned voice profile and download a compatible TTS model yourself. For a cloned voice, add its reference samples. Generate a short test there to confirm the voice/model is ready. The reader does not create voices or download models.
 3. Keep Voicebox running. Its default API should be at `http://127.0.0.1:17493`; check `http://127.0.0.1:17493/docs`. If needed, set `VOICEBOX_BASE_URL` in the root `.env` and restart our backend.
 4. Start this project's backend and frontend using the two terminal commands above. Open a book at `http://127.0.0.1:5173`.
-5. Click **Narrate this paragraph** beside one paragraph. It becomes highlighted, and its text appears in the narration panel above the section. Choose a voice/profile and a downloaded compatible model.
-6. Click **Generate narration**. The status progresses from pending to queued/generating, then completed. Click **Load paragraph in player**, then press **Play** in the shared bottom player. Playback requires this user action; it never starts automatically. Use the native pause and seek controls.
-7. Request the same paragraph/profile/model again to reuse its audio. After editing a voice in Voicebox, use **Refresh Voicebox** and **Regenerate** to explicitly create fresh audio. Normal requests also detect profile metadata/version/model identity changes where exposed.
+5. Choose a section using the reader’s **Section** selector. Expand **Chapter audio**, then choose a voice and downloaded model.
+6. Click **Generate chapter**. Watch queued/generating/assembling status and the completed chunk count. Once ready, choose a **Saved audio version** and click **Load chapter in player**, then press **Play** in the bottom player.
+7. Repeating Generate reuses compatible cached chapter/chunk audio. After changing a profile in Voicebox, click **Refresh chapter voices** and use **Generate replacement** to request a fresh version. Older chapter versions remain available.
 
-Voicebox status is separate from backend health. An offline speech service does not prevent section navigation. Previously cached audio remains playable without Voicebox; select the same paragraph and use **Refresh saved narrations** to load its saved results. Selecting another paragraph or voice does not attach the previous request's audio to the new selection; generation can finish in the background and is available when you return.
+Voicebox status is separate from backend health. It is required for new speech generation, but reading and saved chapter playback work without it. Chapter generation continues when you navigate away. Paragraphs are ordinary selectable, copyable text; narration is selected at chapter level only.
 
 ### Narration configuration
 
@@ -175,36 +175,20 @@ Voicebox status is separate from backend health. An offline speech service does 
 | `VOICEBOX_BASE_URL` | `http://127.0.0.1:17493` | External local service, no frontend direct calls |
 | `VOICEBOX_TIMEOUT_SECONDS` | `10` | HTTP operation timeout; this is not a total model-generation timeout |
 | `VOICEBOX_POLL_SECONDS` | `2` | Interval between background reconciliation passes |
-| `MAX_NARRATION_CHARS` | `5000` | Local paragraph cap, also bounded by provider schema and 50,000 |
+| `MAX_NARRATION_CHARS` | `5000` | Per-request cap used by internal chunking and legacy APIs; also bounded by provider schema and 50,000 |
 | `MAX_AUDIO_BYTES` | `104857600` | Maximum downloaded WAV bytes per result |
 
-The inspected provider accepts up to 50,000 characters and performs its own internal splitting above 800 characters. Paragraph generation remains available alongside chapter generation. Effects and personality rewriting are explicitly disabled. Language comes from the selected Voicebox profile.
+The inspected provider accepts up to 50,000 characters and performs its own internal splitting above 800 characters. The chapter service splits stored text into bounded chunks; paragraph-level controls are no longer part of the interface. Effects and personality rewriting are explicitly disabled. Language comes from the selected Voicebox profile.
 
-Audio lives under `backend/data/audio/<audio-uuid>.wav` by default and is served only by `/api/audio/{audio_id}`. HTTP range responses support seeking. The cache includes exact stored text, paragraph ID, Voicebox address/version/backend, exposed model repository identity, profile ID/metadata, and all sent generation settings. Provider model weight hashes and sample-content revisions are not exposed; use **Regenerate** after changing them. Repeated explicit regenerations retain earlier audio versions and consume disk space; automatic eviction is outside this milestone.
+Internal chunk audio remains under `backend/data/audio/<audio-uuid>.wav`; final chapter files are under `backend/data/chapters/` and served by `/api/chapter-audio/{audio_id}` with byte-range seeking. Exact text, source IDs, voice/model/provider identity, and settings remain part of cache identity. Use **Generate replacement** after changing a profile whose sample revisions are not exposed by Voicebox. Earlier files are retained; automatic cache eviction is outside this milestone.
 
-### Failed or interrupted narration
+### Retained internal narration machinery
 
-- Before submission, missing models, invalid profiles, incompatible schemas, and excessive text produce clear errors without enqueueing work. Fix the Voicebox setup or choose another paragraph/model.
-- When Voicebox reports generation failure, the job becomes failed. **Regenerate** is an explicit new request; ordinary repeated Generate calls do not silently resubmit failed work.
-- With a saved provider ID, temporary connectivity failures keep the request available for polling. Restarting our backend resumes reconciliation by that ID, without generation resubmission.
-- A timeout, server error, or reader shutdown during submission can leave the outcome unknown. The job becomes failed with an ambiguity message. Check Voicebox history before using **Regenerate**, since the provider might already be producing audio. There is no verified idempotency-key contract or safe automatic match by text.
-- If downloading/caching audio fails, **Retry audio retrieval** polls the same provider ID and downloads again; it does not generate another recording.
-- **Recheck provider job** only reconciles an existing ID. Use it after resolving provider/configuration problems. If you changed the Voicebox address, restore the original address before rechecking old jobs; IDs are not assumed portable between services.
-- Startup recovers interrupted jobs and removes unreferenced UUID audio files/partial downloads. Run one backend worker with each data directory.
+The original `NarrationService`, `narrations` table, and cached recordings remain because chapter chunks reference those rows for provider job IDs, deduplication, retries, and restart recovery. Whole-block chunks can reuse compatible audio created before 5A.1. The frontend no longer calls `/api/narrations` or renders individual recordings.
 
-### Narration verification
+Legacy `/api/narrations` and `/api/audio/{audio_id}` routes are retained for compatibility, inspection/recovery of existing jobs, and regression tests that seed legacy cache entries. Chapter scheduling calls the shared service/database directly rather than these HTTP routes. The same router also provides `/api/voicebox/profiles`, which chapter voice selection needs. Removing the old UI requires no backend removal or migration; no records, uploaded books, cached chunks, or chapter files are deleted.
 
-Run `uv run pytest` in `backend/` and `npm run build` in `frontend/`. Narration tests use `httpx.MockTransport`, synthetic EPUBs, and synthetic WAV bytes. They verify the HTTP contract and application behavior; they do **not** verify actual TTS or browser decoding. The existing two upstream test-client deprecation warnings remain.
-
-Voicebox was unavailable during the initial milestone 3 implementation. Milestone 4 subsequently verified real chapter generation; browser automation is still unavailable. To complete browser checks:
-
-1. Follow the first-narration steps with a short paragraph and verify audible playback, pause, and seeking.
-2. Repeat Generate and confirm cached reuse; explicitly Regenerate and confirm a new recording appears.
-3. Start a generation, select another paragraph, and confirm the old result is not displayed as that paragraph's narration. Return to the original and refresh saved narrations.
-4. Restart our backend while Voicebox is generating, then return to the paragraph; confirm the saved provider ID is reconciled.
-5. Stop Voicebox, verify EPUB navigation still works and already-cached audio plays, then restart Voicebox and refresh its status.
-
-No automatic next-paragraph generation, audiobook export UI, word highlighting, browser-speech fallback, or voice-cloning UI is included.
+Failed/interrupted chapter work is handled through **Retry / resume remaining work** and the ambiguity acknowledgement described below. Provider IDs are reconciled rather than blindly resubmitted. Existing legacy requests can still finish during backend recovery.
 
 ## Generate and listen to a saved chapter
 
@@ -231,7 +215,7 @@ Ordinary Generate clicks reuse a matching chapter job and compatible cached chun
 ### Chapter storage and limits
 
 - Chunk WAVs remain under `DATA_DIR/audio`; final chapter WAVs are under `DATA_DIR/chapters/<audio-uuid>.wav`. Never move or rename these files independently of SQLite.
-- `CHAPTER_CHUNK_CHARS=800` sets the default deterministic split limit, additionally bounded by the configured paragraph cap and live provider schema. Blocks/headings remain in section order. Long blocks prefer sentence boundaries; a sentence longer than the limit falls back to whitespace between words. An individual over-limit word is rejected rather than modified. Every source character, punctuation mark, and offset is preserved within stored chunk spans.
+- `CHAPTER_CHUNK_CHARS=800` sets the default deterministic split limit, additionally bounded by the configured per-request cap and live provider schema. Blocks/headings remain in section order. Long blocks prefer sentence boundaries; a sentence longer than the limit falls back to whitespace between words. An individual over-limit word is rejected rather than modified. Every source character, punctuation mark, and offset is preserved within stored chunk spans.
 - `MAX_CHAPTER_AUDIO_BYTES=1073741824` limits an assembled file to 1 GiB by default. PCM files are larger than compressed MP3s. No resampling, encoding conversion, cache eviction, or external audio dependency is added.
 - Run one backend worker per data directory. At most one chapter chunk is outstanding globally, while the existing paragraph API remains available. Voicebox owns model inference scheduling.
 - Progress is one latest listening position per book, associated with the exact chapter job/audio version. Timestamp-ordered writes reject stale save requests; the newest save wins across tabs on this single-user machine.
@@ -299,17 +283,17 @@ This is an unauthenticated, single-user development app: other devices able to r
 
 ### Mobile controls and playback
 
-The native section selector replaces the need for a sidebar or modal drawer. Chapter generation and paragraph narration use keyboard-accessible disclosure controls; chapter generation counts remain in the chapter disclosure heading when closed. Selecting **Narrate this paragraph** opens its panel and focuses its heading. There are no modal dialogs or custom focus traps.
+The native section selector replaces the need for a sidebar or modal drawer. Chapter generation uses a keyboard-accessible disclosure control; its completed chunk count remains visible in the heading when closed. Paragraphs remain normal text with native text selection and copying. There are no modal dialogs or custom focus traps.
 
-One shared player stays mounted when you open/close these controls, choose reading sections, visit the bookshelf, or open another book. Only loading different audio or choosing an adjacent audio chapter changes the source. Paragraph and chapter recordings share this player, preventing overlap within one tab. Separate browser tabs/devices remain independent; avoid starting several at once.
+One shared player stays mounted when you open/close these controls, choose reading sections, visit the bookshelf, or open another book. Only loading different audio or choosing an adjacent audio chapter changes the source. All chapter versions use this one player, preventing overlap within one tab. Separate browser tabs/devices remain independent; avoid starting several at once.
 
 The bottom player uses native play/pause and seeking, plus speed and chapter controls. Its measured height reserves reading space, including the phone safe area; in short landscape viewports its controls can scroll. Book text wraps and retains adjustable size. Loading/restoring audio does not autoplay; automatic next-chapter playback remains subject to browser permission and displays a message if rejected. The native player reflects actual browser playback state rather than an optimistic “playing” label.
 
-Chapter progress saves to SQLite every five seconds during playback, on pause/seek/speed change, and best-effort on hiding/leaving the page. A local-storage book ID is only a resume hint; the backend is the source of the saved version/position/speed. Opening a book restores its saved position without replacing audio already loaded. Paragraph progress is not persisted. Refreshing reloads the media; it cannot preserve uninterrupted sound. Force quits and OS suspension can prevent the final save. A phone and laptop share the latest saved position per book; simultaneous playback can overwrite it.
+Chapter progress saves to SQLite every five seconds during playback, on pause/seek/speed change, and best-effort on hiding/leaving the page. A local-storage book ID is only a resume hint; the backend is the source of the saved version/position/speed. Opening a book restores its saved position without replacing audio already loaded. Refreshing reloads the media; it cannot preserve uninterrupted sound. Force quits and OS suspension can prevent the final save. A phone and laptop share the latest saved position per book; simultaneous playback can overwrite it.
 
 ### Verification and manual phone checks
 
-Automated checks for 5A: `cd frontend && npm test` runs eight jsdom tests with mocked media/network APIs (navigation continuity, single-player replacement, passive restoration, versioned saves, ordered continuation/rejected play, and missing next audio, stale continuation responses, and failed-save retry). `npm run build` checks TypeScript and builds Vite. `cd backend && uv run pytest` runs the 58 existing tests. These are not browser audio or layout tests.
+Automated checks for 5A: `cd frontend && npm test` includes eight playback jsdom tests with mocked media/network APIs (navigation continuity, single-player replacement, passive restoration, versioned saves, ordered continuation/rejected play, and missing next audio, stale continuation responses, and failed-save retry). `npm run build` checks TypeScript and builds Vite. `cd backend && uv run pytest` runs the 58 existing tests. These are not browser audio or layout tests.
 
 A temporary opt-in Vite server on port 5174 served the page and proxied `/api/health` through the Mac’s LAN address, returning `{"status":"ok"}`. This was a request from the Mac itself, not a phone. No browser automation was available: desktop/mobile emulation, horizontal-overflow measurements, audible playback, and actual phone/background/lock-screen behavior have **not** been verified for 5A. The milestone 4 live generation evidence remains separate above.
 
@@ -318,7 +302,7 @@ On your phone, check:
 1. Open the LAN URL. Confirm **Backend connected**, browse books, upload your unencrypted EPUB using the file picker, and check upload loading/error states.
 2. Open a book. Use the section selector, previous/next buttons, and font-size slider. At narrow widths (320, 375, 390, and 430 CSS pixels in desktop developer tools), also check long titles and that the page does not scroll sideways. Check desktop width (1280 pixels) separately. Emulation does not replace phone testing.
 3. Expand **Chapter audio**. Generate a short section or load a saved version. Close the disclosure while generation runs and confirm its chunk count updates. Leave and return; completed audio should remain available.
-4. Load chapter audio and press Play. Seek forward/back, pause, and change speed. While it plays, open menus, navigate reading sections, visit the bookshelf, and open another book: the same recording should continue. Load a paragraph explicitly and confirm the chapter stops with only one player visible.
+4. Load chapter audio and press Play. Seek forward/back, pause, and change speed. While it plays, open menus, navigate reading sections, visit the bookshelf, and open another book: the same recording should continue. Explicitly load another saved chapter/version and confirm the old recording stops with only one player visible.
 5. Return to the chapter, play and pause midway, then refresh: saved offset/version/speed should restore without autoplay. Repeat after restarting the backend. Generate two adjacent sections with the same voice/model and test automatic continuation; test the message when the next audio is unavailable.
 6. Close Voicebox, keeping frontend/backend running. Reload and play/seek saved audio. Generation should report Voicebox unavailable while reading and saved playback remain usable.
 7. Rotate portrait/landscape, increase text size, and scroll to the final paragraph and buttons. Check that the player/safe area does not obscure content; its controls can scroll in landscape. Test keyboard focus on desktop and VoiceOver labels on the phone.
@@ -332,3 +316,21 @@ On your phone, check:
 - If Voicebox alone is offline, start it only on the laptop and refresh its status. Cached audio needs our backend, not Voicebox. If audio stops after laptop sleep, wake it and ensure the servers are still running.
 
 Service workers, PWA installation, offline phone downloads, secure-origin PWA testing, cloud hosting, and authentication remain outside 5A. Secure-origin testing belongs to 5B.
+
+
+## Milestone 5A.1 verification: chapter-only narration
+
+No setup, dependencies, database migration, or startup commands changed. Run `npm test` and `npm run build` in `frontend/`, and `uv run pytest` in `backend/`.
+
+Automated checks cover the eight shared-player scenarios plus four app-level cases: bookshelf/reader controls with 360px and 1280px window values, selectable text and stable block IDs, generation/queued status/cancel/retry requests, and one restored chapter player across navigation with Voicebox mocked offline. These jsdom tests do not render a visual layout or decode audio. The 58 backend tests cover generation, queue/cache reuse, cancellation/partial retry, assembly, restart recovery, audio ranges, and persisted progress with a simulated offline provider. No new live Voicebox generation or actual browser/phone playback was performed for 5A.1.
+
+Manual checks on desktop and phone:
+
+1. Browse the bookshelf, open a book, and expand **Chapter audio**. Confirm there are no paragraph narration buttons, paragraph status panels, or narration selection highlights. Select and copy text across paragraphs; wording and paragraph boundaries should be unchanged.
+2. Choose a section, voice, and model; **Generate chapter**. Confirm queued/generating/assembling progress. Cancel remaining work and retry/resume, checking that completed chunks are retained. Navigate away and return while generating.
+3. Load a saved chapter version and press Play. Seek, change speed, pause, navigate to the shelf and back, then refresh. Confirm one player, uninterrupted playback during in-app navigation, and restored position/speed after refresh without autoplay.
+4. Load another saved chapter/version explicitly. Confirm the old audio stops. Test previous/next audio chapter and automatic continuation to the next ready section.
+5. Close Voicebox while keeping the reader frontend/backend running. Reload, then play and seek an existing saved chapter. Confirm reading and cached audio remain usable while new generation reports the service unavailable.
+6. At narrow phone and desktop widths, verify readable text and accessible chapter controls. Actual rotation, background, and screen-lock checks remain the separate 5A device checklist above.
+
+PWA/offline downloads, hosting, and direct Kokoro integration remain outside this change. Voicebox stays the external speech provider.

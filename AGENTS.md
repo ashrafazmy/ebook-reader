@@ -1,6 +1,6 @@
 # Project agreement
 
-Build a single-user local EPUB reader with browser-based AI narration. Milestones 1–4 and 5A are implemented. Mobile layout and phone playback remain manual device checks. A short chapter was verified with live Voicebox/Kokoro on 2026-09-12; browser playback/continuation checks remain manual. Keep changes within the requested scope.
+Build a single-user local EPUB reader with browser-based AI narration. Milestones 1–4, 5A, and 5A.1 are implemented. The UI offers chapter-only narration; paragraphs are normal selectable text. Mobile layout and phone playback remain manual device checks. A short chapter was verified with live Voicebox/Kokoro on 2026-09-12; browser playback/continuation checks remain manual. Keep changes within the requested scope.
 
 ## Stack and layout
 
@@ -35,6 +35,6 @@ From the repository root: `curl --fail http://127.0.0.1:8000/api/health`.
 - Chapter jobs snapshot settings/identity. Schedule at most one outstanding chapter chunk globally; reuse the paragraph narration service and compatible cache entries. Cancelling stops remaining scheduling, not already scheduled/shared provider work.
 - Assemble decoded, matching PCM WAV frames with Python's standard `wave` module. Publish atomically after verification; keep chunks and earlier playable versions on failure. Do not concatenate encoded files or silently resample.
 - Listening progress records the chapter job/audio version and seconds offset. Save periodically/on pause; restore without autoplay. Continue to the next ready chapter in spine order only after user-started playback.
-- Keep one app-level audio player across navigation. Generation panels explicitly load audio; they must not create their own players. Keep requests relative to the application origin.
+- Keep one app-level chapter audio player across navigation. Retain the shared NarrationService, legacy APIs, records, and cached chunks used by chapter generation; do not reintroduce paragraph narration controls. Generation panels explicitly load audio; they must not create their own players. Keep requests relative to the application origin.
 - No authentication, Docker, cloud deployment, Redis, or separate task platform at this stage.
 - Distinguish implemented, planned, and mocked behavior in documentation. Do not push or create remote repositories without explicit authorization.

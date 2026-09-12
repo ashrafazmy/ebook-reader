@@ -54,14 +54,14 @@ export default function Bookshelf() {
           <input type="file" accept=".epub,application/epub+zip" disabled={uploading} onChange={upload} aria-label="Upload EPUB" />
         </label>
       </div>
-      <p className="intro">Upload an unencrypted EPUB, then settle into your next chapter.</p>
+      <p className="intro">Upload an unencrypted EPUB to read or generate chapter audio.</p>
       {uploading && <p role="status">Uploading and preparing your book. Please keep this page open.</p>}
       {notice && <p role="status">{notice}</p>}
       {uploadError && <p role="alert" className="error">{uploadError}</p>}
       {loading ? <p role="status">Loading your bookshelf…</p> : error ? (
         <div className="error" role="alert"><p>{error}</p><button onClick={() => setAttempt((value) => value + 1)}>Retry bookshelf</button></div>
       ) : books.length === 0 ? (
-        <section className="empty"><h2>Your next chapter starts here.</h2><p>No books yet. Use Upload EPUB to add your first book.</p></section>
+        <section className="empty"><h2>Your next chapter starts here.</h2><p>No books yet. Use Upload EPUB to add a book, then choose a chapter to read or narrate.</p></section>
       ) : (
         <div className="book-grid">
           {books.map((book) => <a className="book-card" key={book.id} href={`#book=${book.id}`}>

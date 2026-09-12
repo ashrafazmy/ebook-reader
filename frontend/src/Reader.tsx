@@ -1,6 +1,5 @@
 import { createElement, useEffect, useRef, useState } from 'react';
-import { api, errorMessage, type BookDetail, type SectionDetail, type TextBlock } from './api';
-import NarrationPanel from './NarrationPanel';
+import { api, errorMessage, type BookDetail, type SectionDetail } from './api';
 import ChapterAudio from './ChapterAudio';
 
 export default function Reader({ bookId }: { bookId: string }) {
@@ -12,9 +11,7 @@ export default function Reader({ bookId }: { bookId: string }) {
   const [sectionError, setSectionError] = useState('');
   const [attempt, setAttempt] = useState(0);
   const [chapterStatus, setChapterStatus] = useState('generation and saved versions');
-  const [selected, setSelected] = useState<TextBlock | null>(null);
   const article = useRef<HTMLElement>(null);
-  const narrationDetails = useRef<HTMLDetailsElement>(null);
 
   useEffect(() => {
     const controller = new AbortController();
@@ -30,7 +27,6 @@ export default function Reader({ bookId }: { bookId: string }) {
     if (!sectionId) return;
     const controller = new AbortController();
     setSection(null);
-    setSelected(null);
     setSectionError('');
     api<SectionDetail>(`/books/${encodeURIComponent(bookId)}/sections/${sectionId}`, { signal: controller.signal })
       .then((content) => { if (!controller.signal.aborted) setSection(content); })
@@ -43,7 +39,6 @@ export default function Reader({ bookId }: { bookId: string }) {
     setSection(null);
     setSectionError('');
     setIndex(position);
-    setSelected(null);
     article.current?.focus();
     article.current?.scrollIntoView({ block: 'start' });
   }
@@ -75,19 +70,13 @@ export default function Reader({ bookId }: { bookId: string }) {
             if (position >= 0) navigate(position);
           }} />
           </details>
-          <details ref={narrationDetails} className="generation-details"><summary>Paragraph narration</summary>
-          <NarrationPanel key={sectionId} paragraph={section?.blocks.some((block) => block.id === selected?.id) ? selected : null} />
-          </details>
           <article ref={article} tabIndex={-1} className="reading-content" style={{ fontSize }} aria-label={book.sections[index]?.title} aria-busy={!section && !sectionError}>
             {sectionError ? <div role="alert" className="error"><p>{sectionError}</p><button onClick={() => setAttempt((value) => value + 1)}>Retry section</button></div>
               : !section ? <p role="status">Loading section…</p> : section.blocks.map((block) =>
                 // Text children are escaped by React. No EPUB HTML is inserted.
                 block.kind === 'heading' ? createElement(`h${Math.min(6, Math.max(1, block.heading_level ?? 2))}`,
                   { key: block.id, id: `block-${block.id}`, 'data-block-id': block.id }, block.text)
-                  : <div key={block.id} className={`paragraph ${selected?.id === block.id ? 'selected' : ''}`}>
-                      <p id={`block-${block.id}`} data-block-id={block.id}>{block.text}</p>
-                      <button className="narrate-paragraph" aria-pressed={selected?.id === block.id} onClick={() => { setSelected(block); if (narrationDetails.current) { narrationDetails.current.open = true; narrationDetails.current.querySelector('summary')?.focus(); narrationDetails.current.scrollIntoView({ block: 'start' }); } }}>Narrate this paragraph</button>
-                    </div>,
+                  : <p key={block.id} id={`block-${block.id}`} data-block-id={block.id}>{block.text}</p>,
               )}
           </article>
           <nav className="section-navigation" aria-label="Continue reading">

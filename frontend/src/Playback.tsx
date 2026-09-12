@@ -3,22 +3,22 @@ import { api, errorMessage, type BookDetail } from './api';
 
 export interface ChapterVersion { id: string; section_id: string; profile_id: string; profile_name: string; model_name: string; state: string; audio_url: string | null }
 export interface Progress { version_id: string; section_id: string; offset: number; speed: number }
-interface Track { id: string; url: string; title: string; chapter?: { book: BookDetail; version: ChapterVersion }; offset?: number; speed?: number }
-interface PlaybackContext { track: Track | null; load: (track: Track, onlyIfEmpty?: boolean) => void; loadChapter: (book: BookDetail, version: ChapterVersion) => Promise<void> }
+interface ChapterTrack { id: string; url: string; title: string; chapter: { book: BookDetail; version: ChapterVersion }; offset?: number; speed?: number }
+interface PlaybackContext { track: ChapterTrack | null; load: (track: ChapterTrack, onlyIfEmpty?: boolean) => void; loadChapter: (book: BookDetail, version: ChapterVersion) => Promise<void> }
 const Context = createContext<PlaybackContext | null>(null);
 export function usePlayback() {
   const value = useContext(Context);
   if (!value) throw new Error('PlaybackProvider is required');
   return value;
 }
-export function chapterTrack(book: BookDetail, version: ChapterVersion, progress?: Progress | null): Track {
+export function chapterTrack(book: BookDetail, version: ChapterVersion, progress?: Progress | null): ChapterTrack {
   return { id: version.id, url: version.audio_url!, title: `${book.title} · ${book.sections.find((s) => s.id === version.section_id)?.title ?? 'Chapter'} · ${version.profile_name}`,
     chapter: { book, version }, offset: progress?.version_id === version.id ? progress.offset : 0, speed: progress?.speed ?? 1 };
 }
 
 export default function PlaybackProvider({ children }: { children: ReactNode }) {
-  const [track, setTrack] = useState<Track | null>(null);
-  const active = useRef<Track | null>(null);
+  const [track, setTrack] = useState<ChapterTrack | null>(null);
+  const active = useRef<ChapterTrack | null>(null);
   const audio = useRef<HTMLAudioElement>(null);
   const dock = useRef<HTMLElement>(null);
   const [speed, setSpeed] = useState(1);
@@ -34,7 +34,7 @@ export default function PlaybackProvider({ children }: { children: ReactNode }) 
   function save() {
     const current = active.current;
     const player = audio.current;
-    if (!current?.chapter || !player || player.readyState < 1 || !touched.current) return;
+    if (!current || !player || player.readyState < 1 || !touched.current) return;
     timestamp.current = Math.max(Date.now(), timestamp.current + 1);
     void api(`/books/${current.chapter.book.id}/listening-progress`, {
       method: 'PUT', headers: { 'Content-Type': 'application/json' }, keepalive: true,
@@ -42,7 +42,7 @@ export default function PlaybackProvider({ children }: { children: ReactNode }) 
     }).then(() => setSaveError('')).catch(() => setSaveError('Position could not be saved. Check the backend and retry.'));
   }
 
-  function load(next: Track, onlyIfEmpty = false, autoplay = false) {
+  function load(next: ChapterTrack, onlyIfEmpty = false, autoplay = false) {
     if ((onlyIfEmpty && active.current) || active.current?.id === next.id) return;
     save();
     // Pause synchronously before switching sources: there is only one media element.
@@ -54,8 +54,7 @@ export default function PlaybackProvider({ children }: { children: ReactNode }) 
     active.current = next;
     setTrack(next); setSpeed(next.speed ?? 1); setNotice('');
     try {
-      if (next.chapter) localStorage.setItem('reader-listening-book', next.chapter.book.id);
-      else localStorage.removeItem('reader-listening-book');
+      localStorage.setItem('reader-listening-book', next.chapter.book.id);
     } catch { /* Storage restrictions do not prevent playback. */ }
   }
 
@@ -98,7 +97,7 @@ export default function PlaybackProvider({ children }: { children: ReactNode }) 
 
   async function adjacent(delta: number, autoplay = false) {
     const current = active.current;
-    if (!current?.chapter) return;
+    if (!current) return;
     save();
     const { book, version } = current.chapter;
     const next = book.sections[book.sections.findIndex((s) => s.id === version.section_id) + delta];
@@ -117,7 +116,7 @@ export default function PlaybackProvider({ children }: { children: ReactNode }) 
     {!track && notice && <p className="error" role="alert">{notice}</p>}
     {track && <aside ref={dock} className="playback-dock" aria-label="Audio player">
       <div className="playback-inner">
-        <div className="now-playing"><strong title={track.title}>{track.title}</strong>{track.chapter && <a href={`#book=${track.chapter.book.id}`}>Open book</a>}</div>
+        <div className="now-playing"><strong title={track.title}>{track.title}</strong><a href={`#book=${track.chapter.book.id}`}>Open book</a></div>
         <audio ref={audio} aria-label={track.title} controls preload="metadata" src={track.url}
           onLoadedMetadata={(event) => {
             const player = event.currentTarget;
@@ -138,7 +137,7 @@ export default function PlaybackProvider({ children }: { children: ReactNode }) 
           onEnded={() => { save(); if (autoContinue.current) void adjacent(1, true); }}
           onError={() => { autoContinue.current = false; setNotice('Audio could not be loaded. Check the backend, then retry loading audio.'); }} />
         <div className="playback-tools">
-          {track.chapter && <><button className="secondary" aria-label="Previous audio chapter" disabled={track.chapter.book.sections[0]?.id === track.chapter.version.section_id} onClick={() => void adjacent(-1)}>← Chapter</button><button className="secondary" aria-label="Next audio chapter" disabled={track.chapter.book.sections.at(-1)?.id === track.chapter.version.section_id} onClick={() => void adjacent(1)}>Chapter →</button></>}
+          <button className="secondary" aria-label="Previous audio chapter" disabled={track.chapter.book.sections[0]?.id === track.chapter.version.section_id} onClick={() => void adjacent(-1)}>← Chapter</button><button className="secondary" aria-label="Next audio chapter" disabled={track.chapter.book.sections.at(-1)?.id === track.chapter.version.section_id} onClick={() => void adjacent(1)}>Chapter →</button>
           <label>Speed<select value={speed} onChange={(e) => { const value = Number(e.target.value); setSpeed(value); if (audio.current) audio.current.playbackRate = value; touched.current = true; save(); }}>{[.5,.75,1,1.25,1.5,1.75,2,2.5,3].map((value) => <option key={value} value={value}>{value}×</option>)}</select></label>
         </div>
         {notice && <p role="status">{notice} <button className="secondary" onClick={() => { if (active.current && audio.current) { active.current.offset = audio.current.currentTime; active.current.speed = audio.current.playbackRate; } audio.current?.load(); }}>Reload audio</button></p>}

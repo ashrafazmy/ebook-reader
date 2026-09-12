@@ -24,7 +24,7 @@ export default function App() {
         <HealthStatus />
       </header>
       {bookId ? <Reader key={bookId} bookId={bookId} /> : <Bookshelf />}
-      <footer>Your books stay on this computer. Paragraph narration uses your local Voicebox service.</footer>
+      <footer>Your books stay on this computer. Generate chapter audio with local Voicebox; saved chapters play without it.</footer>
     </main></PlaybackProvider>
   );
 }
