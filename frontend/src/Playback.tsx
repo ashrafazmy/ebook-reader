@@ -172,7 +172,7 @@ export default function PlaybackProvider({ children }: { children: ReactNode }) 
           }}>
             {!choices.some((item) => item.id === track.id) && <option value="">Choose a downloaded chapter</option>}
             {choices.map((item) => <option key={item.id} value={item.id}>
-              {item.id === track.id ? 'Playing · ' : ''}Chapter {(playingBook?.sections.findIndex((s) => s.id === item.version.section_id) ?? -1) + 1}: {item.section?.title} · {item.version.duration != null ? `${Math.floor(item.version.duration / 60)}:${String(Math.floor(item.version.duration % 60)).padStart(2, '0')} · ` : ''}{item.version.profile_name} · {item.id.slice(0, 8)}
+              {item.section?.title}
             </option>)}
           </select>
         </label>
