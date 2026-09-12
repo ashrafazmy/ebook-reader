@@ -13,6 +13,7 @@ from app.database import create_database
 from app.upload_limit import UploadLimitMiddleware
 from app.voicebox import VoiceboxProvider
 from app.narration import NarrationService, router as narration_router
+from app.chapters import ChapterService, router as chapters_router
 
 
 def create_app(configuration: Settings = settings, *, voicebox_transport: httpx.AsyncBaseTransport | None = None) -> FastAPI:
@@ -24,9 +25,12 @@ def create_app(configuration: Settings = settings, *, voicebox_transport: httpx.
         application.state.voicebox = VoiceboxProvider(configuration, client)
         application.state.narration = NarrationService(engine, configuration, application.state.voicebox)
         application.state.narration.start()
+        application.state.chapters = ChapterService(engine, configuration, application.state.narration)
+        application.state.chapters.start()
         try:
             yield
         finally:
+            await application.state.chapters.close()
             await application.state.narration.close()
             await client.aclose()
             engine.dispose()
@@ -36,6 +40,7 @@ def create_app(configuration: Settings = settings, *, voicebox_transport: httpx.
     application.add_middleware(UploadLimitMiddleware, max_upload_bytes=configuration.max_upload_bytes)
     application.include_router(router)
     application.include_router(narration_router)
+    application.include_router(chapters_router)
     application.add_api_route("/api/health", health, response_model=HealthResponse)
     return application
 

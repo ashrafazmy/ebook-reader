@@ -1,6 +1,7 @@
 import { createElement, useEffect, useRef, useState } from 'react';
 import { api, errorMessage, type BookDetail, type SectionDetail, type TextBlock } from './api';
 import NarrationPanel from './NarrationPanel';
+import ChapterAudio from './ChapterAudio';
 
 export default function Reader({ bookId }: { bookId: string }) {
   const [book, setBook] = useState<BookDetail | null>(null);
@@ -66,6 +67,10 @@ export default function Reader({ bookId }: { bookId: string }) {
             <span>{index + 1} / {book.sections.length}</span>
             <button disabled={index === book.sections.length - 1} onClick={() => navigate(index + 1)}>Next →</button>
           </nav>
+          <ChapterAudio book={book} sectionId={sectionId!} navigate={(id) => {
+            const position = book.sections.findIndex((item) => item.id === id);
+            if (position >= 0) navigate(position);
+          }} />
           <NarrationPanel key={sectionId} paragraph={section?.blocks.some((block) => block.id === selected?.id) ? selected : null} />
           <article ref={article} tabIndex={-1} className="reading-content" style={{ fontSize }} aria-label={book.sections[index]?.title} aria-busy={!section && !sectionError}>
             {sectionError ? <div role="alert" className="error"><p>{sectionError}</p><button onClick={() => setAttempt((value) => value + 1)}>Retry section</button></div>

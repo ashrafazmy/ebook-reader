@@ -18,6 +18,8 @@ class Settings(BaseSettings):
     voicebox_poll_seconds: float = Field(default=2, gt=0, le=60)
     max_narration_chars: int = Field(default=5000, gt=0, le=50000)
     max_audio_bytes: int = Field(default=100 * 1024 * 1024, gt=0)
+    chapter_chunk_chars: int = Field(default=800, ge=100, le=5000)
+    max_chapter_audio_bytes: int = Field(default=1024 * 1024 * 1024, gt=44, le=2 * 1024 * 1024 * 1024)
     data_dir: Path = ROOT_DIR / "backend" / "data"
     max_upload_bytes: int = Field(default=20 * 1024 * 1024, gt=0)
     max_archive_bytes: int = Field(default=100 * 1024 * 1024, gt=0)
@@ -41,6 +43,10 @@ class Settings(BaseSettings):
     @property
     def audio_dir(self) -> Path:
         return self.data_dir / "audio"
+
+    @property
+    def chapters_dir(self) -> Path:
+        return self.data_dir / "chapters"
 
 
 settings = Settings()

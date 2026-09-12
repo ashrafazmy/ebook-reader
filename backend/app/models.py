@@ -73,3 +73,49 @@ class Narration(Base):
     error_kind: Mapped[str | None]
     audio_id: Mapped[str | None] = mapped_column(unique=True)
     created_at: Mapped[str] = mapped_column(default=lambda: datetime.now(timezone.utc).isoformat())
+
+
+class ChapterJob(Base):
+    __tablename__ = "chapter_jobs"
+    id: Mapped[str] = mapped_column(primary_key=True)
+    section_id: Mapped[str] = mapped_column(ForeignKey("sections.id"), index=True)
+    profile_id: Mapped[str]
+    profile_name: Mapped[str]
+    model_name: Mapped[str]
+    request_json: Mapped[str] = mapped_column(Text)
+    identity_json: Mapped[str] = mapped_column(Text)
+    active_key: Mapped[str | None] = mapped_column(unique=True)
+    state: Mapped[str] = mapped_column(default="queued")
+    error: Mapped[str | None]
+    replacement: Mapped[bool] = mapped_column(default=False)
+    audio_id: Mapped[str] = mapped_column(unique=True)
+    duration: Mapped[float | None]
+    created_at: Mapped[str] = mapped_column(default=lambda: datetime.now(timezone.utc).isoformat())
+    chunks: Mapped[list["ChapterChunk"]] = relationship(cascade="all, delete-orphan", order_by="ChapterChunk.position")
+
+
+class ChapterChunk(Base):
+    __tablename__ = "chapter_chunks"
+    __table_args__ = (UniqueConstraint("job_id", "position"),)
+    id: Mapped[str] = mapped_column(primary_key=True)
+    job_id: Mapped[str] = mapped_column(ForeignKey("chapter_jobs.id"), index=True)
+    source_id: Mapped[str]
+    block_id: Mapped[str] = mapped_column(ForeignKey("text_blocks.id"))
+    position: Mapped[int]
+    start_offset: Mapped[int]
+    end_offset: Mapped[int]
+    text: Mapped[str] = mapped_column(Text)
+    narration_id: Mapped[str | None] = mapped_column(ForeignKey("narrations.id"))
+    state: Mapped[str] = mapped_column(default="queued")
+    error: Mapped[str | None]
+    start_seconds: Mapped[float | None]
+    end_seconds: Mapped[float | None]
+
+
+class ListeningProgress(Base):
+    __tablename__ = "listening_progress"
+    book_id: Mapped[str] = mapped_column(ForeignKey("books.id"), primary_key=True)
+    version_id: Mapped[str] = mapped_column(ForeignKey("chapter_jobs.id"))
+    offset: Mapped[float]
+    speed: Mapped[float]
+    updated_at_ms: Mapped[int]

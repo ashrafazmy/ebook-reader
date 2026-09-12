@@ -2,6 +2,8 @@
 
 Inspected on 2026-09-10: upstream source revision **`51f49dea198384b4eb6087b72c17057c6eb1c1cd`**, whose `backend/__init__.py` declares **0.5.0**. The configured local service at `http://127.0.0.1:17493` did not respond, including an unsandboxed OpenAPI request. No live schema, real voice, model inference, or browser playback was verified. Tests use handcrafted mock responses derived from the source contracts, plus synthetic WAV audio; they do not demonstrate speech quality.
 
+**2026-09-12 update:** the local service is now running. Its live OpenAPI reports 0.5.0 and a 50,000-character generation limit; health reports healthy and `/models/status` reports Kokoro downloaded. The existing generation/history/audio contracts successfully generated two original chapter chunks with the configured preset profile. Assembly produced a valid 24 kHz mono PCM16 WAV (4.525 seconds). Cached audio/range serving and progress survived a reader restart with all Voicebox requests blocked. The installed binary's commit hash is not exposed, so its revision is not assumed identical to upstream. Browser playback and application-closed UI checks remain manual.
+
 ## Evidence
 
 - [README API instructions](https://github.com/jamiepine/voicebox/blob/51f49dea198384b4eb6087b72c17057c6eb1c1cd/README.md)
@@ -34,7 +36,7 @@ The repository's bundled `docs/openapi.json` is **stale**: it declares API 0.1.0
 
 The reader retrieves the stored paragraph text itself and sends it unchanged with `profile_id`, profile `language`, the selected `engine`/`model_size`, `personality=false`, `effects_chain=[]`, `normalize=true`, `seed=null`, and `instruct=null`. It also pins `max_chunk_chars=800` and `crossfade_ms=50`, the verified provider defaults. Explicitly empty effects prevent profile default effects from being inherited. There is no LLM rewrite or browser-speech fallback.
 
-The provider accepts 1–50,000 characters. The reader defaults to a **5,000-character local paragraph cap**; the effective cap is the minimum of configuration, running schema limit, and 50,000. Over-limit paragraphs are rejected with both limits explained. The reader does not split paragraphs or schedule subsequent paragraphs. Voicebox itself may internally split text over 800 characters; that behavior is part of its verified generation implementation.
+The provider accepts 1–50,000 characters. The paragraph endpoint defaults to a **5,000-character local cap**; the effective cap is the minimum of configuration, running schema limit, and 50,000. Over-limit paragraph requests are rejected. Chapter jobs now split stored blocks deterministically into bounded spans (800 characters by default) and use the same verified generation contract. Voicebox itself may internally split text over 800 characters.
 
 Model name mappings are explicit and sourced from the registry:
 

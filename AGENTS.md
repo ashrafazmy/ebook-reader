@@ -1,6 +1,6 @@
 # Project agreement
 
-Build a single-user local EPUB reader with browser-based AI narration. Keep changes within the requested milestone. Milestones 1–3 are implemented; milestone 3 is verified with mocks only until a live Voicebox instance is tested. Milestone 4 is planned.
+Build a single-user local EPUB reader with browser-based AI narration. Milestones 1–4 are implemented. A short chapter was verified with live Voicebox/Kokoro on 2026-09-12; browser playback/continuation checks remain manual. Keep changes within the requested scope.
 
 ## Stack and layout
 
@@ -8,7 +8,7 @@ Build a single-user local EPUB reader with browser-based AI narration. Keep chan
 - `frontend/`: React, TypeScript, Vite; npm.
 - EPUB reader: SQLite with SQLAlchemy; EbookLib and Beautiful Soup; local book storage under `backend/data/books` and database at `backend/data/reader.sqlite3` by default.
 - Milestone 3: external Voicebox HTTP service, isolated behind `VoiceboxProvider`. Default `VOICEBOX_BASE_URL=http://127.0.0.1:17493`.
-- Milestone 4: local audio cache and persisted narration progress.
+- Chapter audio: deterministic section/block spans, existing narration cache, PCM WAV assembly under `DATA_DIR/chapters`, and SQLite listening progress.
 
 ## Commands
 
@@ -32,5 +32,8 @@ From the repository root: `curl --fail http://127.0.0.1:8000/api/health`.
 - Do not fork/copy Voicebox or install its model dependencies here. Reading must remain usable when speech is offline.
 - Voicebox contract evidence is in `docs/voicebox-contract.md`. Use the async `VoiceboxProvider` and `/generate` queue, with `personality=false` and `effects_chain=[]`. Never submit without model readiness checks or blindly repeat ambiguous POSTs.
 - Narrations persist in SQLite; audio uses generated IDs under `DATA_DIR/audio`. Run one worker. Only known provider IDs may be reconciled automatically after restart; unresolved submissions need explicit user regeneration after checking provider history.
+- Chapter jobs snapshot settings/identity. Schedule at most one outstanding chapter chunk globally; reuse the paragraph narration service and compatible cache entries. Cancelling stops remaining scheduling, not already scheduled/shared provider work.
+- Assemble decoded, matching PCM WAV frames with Python's standard `wave` module. Publish atomically after verification; keep chunks and earlier playable versions on failure. Do not concatenate encoded files or silently resample.
+- Listening progress records the chapter job/audio version and seconds offset. Save periodically/on pause; restore without autoplay. Continue to the next ready chapter in spine order only after user-started playback.
 - No authentication, Docker, cloud deployment, Redis, or separate task platform at this stage.
 - Distinguish implemented, planned, and mocked behavior in documentation. Do not push or create remote repositories without explicit authorization.
