@@ -2,14 +2,14 @@
 
 A single-user web application being built for reading unencrypted EPUBs and listening to AI narration locally.
 
-**Implemented: milestones 1–4.** EPUB upload and reading, paragraph narration, saved chapter audiobooks, and persistent listening position. Production code uses real HTTP calls; mocks are used only in tests.
+**Implemented: milestones 1–4 and 5A.** EPUB upload and reading, paragraph narration, saved chapter audiobooks, and persistent listening position, responsive controls, and opt-in home Wi-Fi access. Production code uses real HTTP calls; mocks are used only in tests.
 
 Voicebox/Kokoro chapter generation was **verified live on 2026-09-12**, alongside mock-based tests. Browser playback and automatic continuation remain manual checks. Books, text, jobs, cached chunks, chapter files, and listening position persist across restarts. Saved audio and reading remain available without Voicebox.
 
 ## Prerequisites
 
 - [uv](https://docs.astral.sh/uv/getting-started/installation/) for Python dependencies and Python 3.11 installation.
-- Node.js 22.12+ (Node 22 LTS recommended) and npm. The installed Node 22.14.0 works with this setup; see [Vite requirements](https://vite.dev/guide/).
+- Node.js 22.12+ on the 22.x line (recommended), 24.x, or 26+, and npm. The installed Node 22.14.0 works with this setup; see [Vite requirements](https://vite.dev/guide/).
 - Git. This workspace already has a repository; no remote or push was created.
 
 ## Setup
@@ -163,7 +163,7 @@ Lockfiles remain in version control; install dependencies with `uv sync --locked
 3. Keep Voicebox running. Its default API should be at `http://127.0.0.1:17493`; check `http://127.0.0.1:17493/docs`. If needed, set `VOICEBOX_BASE_URL` in the root `.env` and restart our backend.
 4. Start this project's backend and frontend using the two terminal commands above. Open a book at `http://127.0.0.1:5173`.
 5. Click **Narrate this paragraph** beside one paragraph. It becomes highlighted, and its text appears in the narration panel above the section. Choose a voice/profile and a downloaded compatible model.
-6. Click **Generate narration**. The status progresses from pending to queued/generating, then completed. Press **Play** in the browser audio player. Playback requires this user action; it never starts automatically. Use the native pause and seek controls.
+6. Click **Generate narration**. The status progresses from pending to queued/generating, then completed. Click **Load paragraph in player**, then press **Play** in the shared bottom player. Playback requires this user action; it never starts automatically. Use the native pause and seek controls.
 7. Request the same paragraph/profile/model again to reuse its audio. After editing a voice in Voicebox, use **Refresh Voicebox** and **Regenerate** to explicitly create fresh audio. Normal requests also detect profile metadata/version/model identity changes where exposed.
 
 Voicebox status is separate from backend health. An offline speech service does not prevent section navigation. Previously cached audio remains playable without Voicebox; select the same paragraph and use **Refresh saved narrations** to load its saved results. Selecting another paragraph or voice does not attach the previous request's audio to the new selection; generation can finish in the background and is available when you return.
@@ -209,14 +209,14 @@ No automatic next-paragraph generation, audiobook export UI, word highlighting, 
 ## Generate and listen to a saved chapter
 
 1. Keep Voicebox running with your profile and compatible model downloaded. Start the backend and frontend using the commands in **Run** above, then open a book.
-2. Select the section you want to narrate. In **Chapter audiobook**, choose a voice and model, then click **Generate chapter**. The initial chapter mapping is one existing section (one text-bearing EPUB spine item), which may be part of a chapter or contain several chapters.
+2. Select the section you want to narrate. Expand **Chapter audio**, then in **Chapter audiobook** choose a voice and model, then click **Generate chapter**. The initial chapter mapping is one existing section (one text-bearing EPUB spine item), which may be part of a chapter or contain several chapters.
 3. Watch queued/generating/assembling/ready status and the completed-chunk count. There are no time estimates. You may navigate away or close the browser; the backend keeps working while it remains running.
-4. When ready, press the native audio player's **Play** button. Use its pause/seek controls and the playback-speed selector. Position is saved every five seconds during playback, on pause/seek/speed changes, and best-effort during page exit/navigation.
+4. When ready, select a **Saved audio version**, click **Load chapter in player**, then press the bottom player's native **Play** button. Use its pause/seek controls and the playback-speed selector. Position is saved every five seconds during playback, on pause/seek/speed changes, and best-effort during page exit/navigation.
 5. Refresh or reopen the book: the saved chapter/audio version, offset, and speed are restored, **without autoplay**. Periodic saves limit loss on an abrupt browser crash to roughly five seconds; exit saves cannot be guaranteed after a force quit.
-6. After user-started playback reaches the end, the player continues to the next section's ready audio with the same profile/model, if available. Otherwise it explains the missing audio. Browser autoplay restrictions may require another Play click. Previous/Next chapter buttons also allow manual navigation.
+6. After user-started playback reaches the end, the player continues to the next section's ready audio with the same profile/model, if available. Otherwise it explains the missing audio. Browser autoplay restrictions may require another Play click. The bottom player’s Previous/Next chapter buttons select adjacent ready audio. Reading navigation is independent and never replaces the active audio.
 7. Close Voicebox after the chapter is ready and continue listening. Keep our FastAPI backend running, and keep Vite running when using this development setup; this is not a PWA or a phone download feature.
 
-**Saved audio version** lets you choose earlier ready recordings. Generation uses a snapshot of profile, engine/model, language, and all generation settings. Changing the selectors does not mutate a running job. If the exposed profile/model identity changes mid-generation, remaining submissions fail clearly instead of mixing voices. Use **Generate replacement** for an intentionally changed profile; older ready versions remain playable until and after the replacement succeeds. The player does not switch away from a selected old version mid-playback.
+**Saved audio version** lets you choose earlier ready recordings; press **Load chapter in player** to explicitly switch audio. Generation uses a snapshot of profile, engine/model, language, and all generation settings. Changing the selectors does not mutate a running job. If the exposed profile/model identity changes mid-generation, remaining submissions fail clearly instead of mixing voices. Use **Generate replacement** for an intentionally changed profile; older ready versions remain playable until and after the replacement succeeds. The player does not switch away from a selected old version mid-playback.
 
 Ordinary Generate clicks reuse a matching chapter job and compatible cached chunks, including whole-paragraph audio generated in milestone 3. Generate replacement explicitly creates fresh chunk recordings (already in-flight matching work can still be shared). Repeated clicks while a matching job runs do not enqueue duplicates.
 
@@ -260,3 +260,75 @@ Mock tests cover deterministic spans and order, paragraph-cache reuse, concurren
 5. Generate a replacement and confirm the old version keeps playing until you explicitly choose the new ready version.
 
 PWA support, cloud deployment, offline phone downloads, full-book export, and word-level highlighting remain outside this milestone.
+
+
+## Milestone 5A: use your phone on home Wi-Fi
+
+Run `npm ci` in `frontend/` after updating; Vitest and jsdom are new development-only dependencies for playback regression tests. The test runner requires Node 22.12+ on 22.x, 24.x, or 26+; your existing Node 22.14.0 is supported. Node 20 is no longer supported for this frontend development setup. There are no backend dependencies or database changes for 5A.
+
+On the laptop, terminal 1, from the repository root:
+
+```sh
+cd backend
+uv sync --locked
+uv run uvicorn app.main:app --reload --host 127.0.0.1 --port 8000
+```
+
+Terminal 2, from the repository root:
+
+```sh
+cd frontend
+npm ci
+npm run dev:lan
+```
+
+`dev:lan` explicitly binds **only Vite** to `0.0.0.0:5173`. The regular `npm run dev` remains loopback-only. Vite proxies relative `/api` requests, including upload and seekable audio, to `127.0.0.1:8000` on the laptop. FastAPI and Voicebox stay on loopback. No unrestricted allowed-host or CORS settings are enabled.
+
+Find the Wi-Fi interface and address on the Mac:
+
+```sh
+networksetup -listallhardwareports
+ipconfig getifaddr en0
+```
+
+In the first command’s output, find **Hardware Port: Wi-Fi** and its **Device**. Replace `en0` in the second command if that device has another name. Alternatively, see System Settings → Wi-Fi → your connected network’s Details → TCP/IP. Use the Wi-Fi address, not a VPN interface address.
+
+On a phone connected to the **same home Wi-Fi**, open **`http://<MAC_WIFI_IP>:5173`** in Safari or Chrome. For example, if the Wi-Fi IP is `192.168.1.25`, open `http://192.168.1.25:5173`. Use HTTP for this milestone. The IP is never stored in frontend code. The laptop must remain awake, with both servers running; its address can change after reconnecting. Voicebox is needed for new generation, but can be closed for saved playback.
+
+This is an unauthenticated, single-user development app: other devices able to reach this LAN port can access the library and its API through the proxy. Use a trusted home network and stop Vite when finished. Do not expose Voicebox, disable your firewall, or configure router port forwarding.
+
+### Mobile controls and playback
+
+The native section selector replaces the need for a sidebar or modal drawer. Chapter generation and paragraph narration use keyboard-accessible disclosure controls; chapter generation counts remain in the chapter disclosure heading when closed. Selecting **Narrate this paragraph** opens its panel and focuses its heading. There are no modal dialogs or custom focus traps.
+
+One shared player stays mounted when you open/close these controls, choose reading sections, visit the bookshelf, or open another book. Only loading different audio or choosing an adjacent audio chapter changes the source. Paragraph and chapter recordings share this player, preventing overlap within one tab. Separate browser tabs/devices remain independent; avoid starting several at once.
+
+The bottom player uses native play/pause and seeking, plus speed and chapter controls. Its measured height reserves reading space, including the phone safe area; in short landscape viewports its controls can scroll. Book text wraps and retains adjustable size. Loading/restoring audio does not autoplay; automatic next-chapter playback remains subject to browser permission and displays a message if rejected. The native player reflects actual browser playback state rather than an optimistic “playing” label.
+
+Chapter progress saves to SQLite every five seconds during playback, on pause/seek/speed change, and best-effort on hiding/leaving the page. A local-storage book ID is only a resume hint; the backend is the source of the saved version/position/speed. Opening a book restores its saved position without replacing audio already loaded. Paragraph progress is not persisted. Refreshing reloads the media; it cannot preserve uninterrupted sound. Force quits and OS suspension can prevent the final save. A phone and laptop share the latest saved position per book; simultaneous playback can overwrite it.
+
+### Verification and manual phone checks
+
+Automated checks for 5A: `cd frontend && npm test` runs eight jsdom tests with mocked media/network APIs (navigation continuity, single-player replacement, passive restoration, versioned saves, ordered continuation/rejected play, and missing next audio, stale continuation responses, and failed-save retry). `npm run build` checks TypeScript and builds Vite. `cd backend && uv run pytest` runs the 58 existing tests. These are not browser audio or layout tests.
+
+A temporary opt-in Vite server on port 5174 served the page and proxied `/api/health` through the Mac’s LAN address, returning `{"status":"ok"}`. This was a request from the Mac itself, not a phone. No browser automation was available: desktop/mobile emulation, horizontal-overflow measurements, audible playback, and actual phone/background/lock-screen behavior have **not** been verified for 5A. The milestone 4 live generation evidence remains separate above.
+
+On your phone, check:
+
+1. Open the LAN URL. Confirm **Backend connected**, browse books, upload your unencrypted EPUB using the file picker, and check upload loading/error states.
+2. Open a book. Use the section selector, previous/next buttons, and font-size slider. At narrow widths (320, 375, 390, and 430 CSS pixels in desktop developer tools), also check long titles and that the page does not scroll sideways. Check desktop width (1280 pixels) separately. Emulation does not replace phone testing.
+3. Expand **Chapter audio**. Generate a short section or load a saved version. Close the disclosure while generation runs and confirm its chunk count updates. Leave and return; completed audio should remain available.
+4. Load chapter audio and press Play. Seek forward/back, pause, and change speed. While it plays, open menus, navigate reading sections, visit the bookshelf, and open another book: the same recording should continue. Load a paragraph explicitly and confirm the chapter stops with only one player visible.
+5. Return to the chapter, play and pause midway, then refresh: saved offset/version/speed should restore without autoplay. Repeat after restarting the backend. Generate two adjacent sections with the same voice/model and test automatic continuation; test the message when the next audio is unavailable.
+6. Close Voicebox, keeping frontend/backend running. Reload and play/seek saved audio. Generation should report Voicebox unavailable while reading and saved playback remain usable.
+7. Rotate portrait/landscape, increase text size, and scroll to the final paragraph and buttons. Check that the player/safe area does not obscure content; its controls can scroll in landscape. Test keyboard focus on desktop and VoiceOver labels on the phone.
+8. Background the browser, lock the screen, then return and unlock. Record your phone model, OS/browser version, whether sound continued, displayed play/pause state, and saved position. Interruptions may require pressing Play again. **Uninterrupted background or lock-screen playback is not promised.**
+
+### Connection troubleshooting
+
+- If the phone cannot open the page, confirm `npm run dev:lan` is running, use the current Wi-Fi IP and port 5173, and use `http://`, not HTTPS or `localhost`. Stop a conflicting dev server if Vite reports the port occupied.
+- Check the page on the Mac using that same LAN URL. If it works there but not on the phone, check both devices’ Wi-Fi, guest-network/client isolation, and VPN routing. Permit incoming connections for the Node/Vite process in macOS firewall settings if prompted; keep the firewall enabled.
+- If the page loads but says backend offline, verify terminal 1 and run `curl --fail http://127.0.0.1:8000/api/health` on the Mac, then `curl --fail http://127.0.0.1:5173/api/health`. Keep the backend on port 8000 to match the proxy.
+- If Voicebox alone is offline, start it only on the laptop and refresh its status. Cached audio needs our backend, not Voicebox. If audio stops after laptop sleep, wake it and ensure the servers are still running.
+
+Service workers, PWA installation, offline phone downloads, secure-origin PWA testing, cloud hosting, and authentication remain outside 5A. Secure-origin testing belongs to 5B.

@@ -11,8 +11,10 @@ export default function Reader({ bookId }: { bookId: string }) {
   const [bookError, setBookError] = useState('');
   const [sectionError, setSectionError] = useState('');
   const [attempt, setAttempt] = useState(0);
+  const [chapterStatus, setChapterStatus] = useState('generation and saved versions');
   const [selected, setSelected] = useState<TextBlock | null>(null);
   const article = useRef<HTMLElement>(null);
+  const narrationDetails = useRef<HTMLDetailsElement>(null);
 
   useEffect(() => {
     const controller = new AbortController();
@@ -67,11 +69,15 @@ export default function Reader({ bookId }: { bookId: string }) {
             <span>{index + 1} / {book.sections.length}</span>
             <button disabled={index === book.sections.length - 1} onClick={() => navigate(index + 1)}>Next →</button>
           </nav>
-          <ChapterAudio book={book} sectionId={sectionId!} navigate={(id) => {
+          <details className="generation-details"><summary>Chapter audio · {chapterStatus}</summary>
+          <ChapterAudio onStatus={setChapterStatus} book={book} sectionId={sectionId!} navigate={(id) => {
             const position = book.sections.findIndex((item) => item.id === id);
             if (position >= 0) navigate(position);
           }} />
+          </details>
+          <details ref={narrationDetails} className="generation-details"><summary>Paragraph narration</summary>
           <NarrationPanel key={sectionId} paragraph={section?.blocks.some((block) => block.id === selected?.id) ? selected : null} />
+          </details>
           <article ref={article} tabIndex={-1} className="reading-content" style={{ fontSize }} aria-label={book.sections[index]?.title} aria-busy={!section && !sectionError}>
             {sectionError ? <div role="alert" className="error"><p>{sectionError}</p><button onClick={() => setAttempt((value) => value + 1)}>Retry section</button></div>
               : !section ? <p role="status">Loading section…</p> : section.blocks.map((block) =>
@@ -80,7 +86,7 @@ export default function Reader({ bookId }: { bookId: string }) {
                   { key: block.id, id: `block-${block.id}`, 'data-block-id': block.id }, block.text)
                   : <div key={block.id} className={`paragraph ${selected?.id === block.id ? 'selected' : ''}`}>
                       <p id={`block-${block.id}`} data-block-id={block.id}>{block.text}</p>
-                      <button className="narrate-paragraph" aria-pressed={selected?.id === block.id} onClick={() => setSelected(block)}>Narrate this paragraph</button>
+                      <button className="narrate-paragraph" aria-pressed={selected?.id === block.id} onClick={() => { setSelected(block); if (narrationDetails.current) { narrationDetails.current.open = true; narrationDetails.current.querySelector('summary')?.focus(); narrationDetails.current.scrollIntoView({ block: 'start' }); } }}>Narrate this paragraph</button>
                     </div>,
               )}
           </article>

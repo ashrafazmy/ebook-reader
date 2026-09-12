@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
 import { api, errorMessage, type TextBlock } from './api';
+import { usePlayback } from './Playback';
 
 interface Voice { id: string; name: string; language: string; models: { id: string; name: string; downloaded: boolean }[] }
 interface Job {
@@ -10,6 +11,8 @@ interface Job {
 interface Catalog { profiles: Voice[]; text_limit: number }
 
 export default function NarrationPanel({ paragraph }: { paragraph: TextBlock | null }) {
+  const playback = usePlayback();
+  function loadAudio(item: Job) { playback.load({ id: item.id, url: item.audio_url!, title: `Paragraph · ${item.profile_name} · ${item.model_name}` }); }
   const [catalog, setCatalog] = useState<Catalog | null>(null);
   const [connection, setConnection] = useState('Checking Voicebox…');
   const [profileId, setProfileId] = useState('');
@@ -130,7 +133,7 @@ export default function NarrationPanel({ paragraph }: { paragraph: TextBlock | n
     {catalog?.profiles.length === 0 && <p>Create a voice profile in Voicebox, then refresh here.</p>}
     {profile && profile.models.length === 0 && <p>This profile has no compatible models or reference samples. Configure it in Voicebox first.</p>}
     {model && !model.downloaded && <p>Download this model in Voicebox first. The reader does not download models.</p>}
-    {tooLong && <p role="alert">This paragraph exceeds the {catalog?.text_limit}-character limit. Paragraph splitting is planned for milestone 4.</p>}
+    {tooLong && <p role="alert">This paragraph exceeds the {catalog?.text_limit}-character limit. Use chapter generation to split longer text.</p>}
     <div className="narration-actions">
       <button disabled={!paragraph || !model?.downloaded || busy || active || tooLong} onClick={() => void generate()}>{busy ? 'Requesting…' : active ? 'Generating…' : 'Generate narration'}</button>
       <button className="secondary" disabled={!paragraph || !model?.downloaded || busy || active || tooLong} onClick={() => void generate(true)}>Regenerate</button>
@@ -144,8 +147,8 @@ export default function NarrationPanel({ paragraph }: { paragraph: TextBlock | n
       {job.error_kind === 'ambiguous' && <p>Do not regenerate until you check Voicebox history; the previous request may already be generating.</p>}
       {job.error_kind === 'audio' && <button disabled={busy} onClick={() => void generate(false, true)}>Retry audio retrieval</button>}
       {job.state === 'failed' && job.provider_job_id && job.error_kind !== 'audio' && <button disabled={busy} onClick={() => void generate(false, false, true)}>Recheck provider job</button>}
-      {job.audio_url && <audio key={job.audio_url} controls preload="metadata" src={job.audio_url} onError={() => setError('The browser could not load this audio. Refresh saved narrations or use Generate to check the cache.')} />}
+      {job.audio_url && <button onClick={() => loadAudio(job)}>{playback.track?.id === job.id ? 'Loaded in player' : 'Load paragraph in player'}</button>}
     </div>}
-    {!catalog && jobs.length > 0 && <div><h3>Saved narrations for this paragraph</h3>{jobs.filter((item) => item.paragraph_id === paragraphId && item.id !== job?.id && item.audio_url).map((item) => <div key={item.id}><p>{item.profile_name} · {item.model_name}</p><audio key={item.audio_url} controls preload="metadata" src={item.audio_url!} /></div>)}</div>}
+    {!catalog && jobs.length > 0 && <div><h3>Saved narrations for this paragraph</h3>{jobs.filter((item) => item.paragraph_id === paragraphId && item.id !== job?.id && item.audio_url).map((item) => <div key={item.id}><p>{item.profile_name} · {item.model_name}</p><button onClick={() => loadAudio(item)}>Load saved paragraph in player</button></div>)}</div>}
   </aside>;
 }

@@ -1,6 +1,6 @@
 # Project agreement
 
-Build a single-user local EPUB reader with browser-based AI narration. Milestones 1–4 are implemented. A short chapter was verified with live Voicebox/Kokoro on 2026-09-12; browser playback/continuation checks remain manual. Keep changes within the requested scope.
+Build a single-user local EPUB reader with browser-based AI narration. Milestones 1–4 and 5A are implemented. Mobile layout and phone playback remain manual device checks. A short chapter was verified with live Voicebox/Kokoro on 2026-09-12; browser playback/continuation checks remain manual. Keep changes within the requested scope.
 
 ## Stack and layout
 
@@ -14,14 +14,14 @@ Build a single-user local EPUB reader with browser-based AI narration. Milestone
 
 From `backend/`: `uv sync --locked`, `uv run pytest`, `uv run uvicorn app.main:app --reload --host 127.0.0.1 --port 8000`.
 
-From `frontend/`: `npm ci`, `npm run dev`, `npm run build`.
+From `frontend/`: `npm ci`, `npm run dev`, `npm run dev:lan` (opt-in trusted LAN), `npm test`, `npm run build`.
 
 From the repository root: `curl --fail http://127.0.0.1:8000/api/health`.
 
 ## Conventions
 
 - Keep Python modules small with explicit imports and type hints. Add modules when behavior needs them; avoid speculative layers.
-- Use `/api` for backend routes and relative frontend requests. Vite proxies to port 8000. Bind development servers to loopback.
+- Use `/api` for backend routes and relative frontend requests. Vite proxies to port 8000. Bind development servers to loopback by default. Only opt-in `npm run dev:lan` exposes Vite; keep FastAPI and Voicebox on loopback.
 - Load backend configuration through `app/config.py`. Root `.env` is local; `.env.example` documents settings without secrets. Never place secrets in Vite client variables.
 - Track `backend/uv.lock` and `frontend/package-lock.json`. Do not commit virtual environments, dependencies, generated output, databases, books, audio, or models.
 - Add focused pytest tests for meaningful backend behavior; run tests and the frontend build for relevant changes.
@@ -35,5 +35,6 @@ From the repository root: `curl --fail http://127.0.0.1:8000/api/health`.
 - Chapter jobs snapshot settings/identity. Schedule at most one outstanding chapter chunk globally; reuse the paragraph narration service and compatible cache entries. Cancelling stops remaining scheduling, not already scheduled/shared provider work.
 - Assemble decoded, matching PCM WAV frames with Python's standard `wave` module. Publish atomically after verification; keep chunks and earlier playable versions on failure. Do not concatenate encoded files or silently resample.
 - Listening progress records the chapter job/audio version and seconds offset. Save periodically/on pause; restore without autoplay. Continue to the next ready chapter in spine order only after user-started playback.
+- Keep one app-level audio player across navigation. Generation panels explicitly load audio; they must not create their own players. Keep requests relative to the application origin.
 - No authentication, Docker, cloud deployment, Redis, or separate task platform at this stage.
 - Distinguish implemented, planned, and mocked behavior in documentation. Do not push or create remote repositories without explicit authorization.

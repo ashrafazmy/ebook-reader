@@ -96,7 +96,7 @@ Limits and manual live checks are in README. The paragraph endpoint still submit
 
 ## Milestone 4: implemented chapter audiobooks
 
-`chapters.py` coordinates persistent chapter plans; `chapter_audio.py` owns deterministic source spans and WAV assembly. `ChapterAudio.tsx` provides chapter generation, saved versions, and listening controls. Existing paragraph generation and its durable cache remain intact.
+`chapters.py` coordinates persistent chapter plans; `chapter_audio.py` owns deterministic source spans and WAV assembly. `ChapterAudio.tsx` provides chapter generation and saved-version selection; `Playback.tsx` now owns shared listening controls (milestone 5A). Existing paragraph generation and its durable cache remain intact.
 
 ### Mapping and data model
 
@@ -149,3 +149,18 @@ Restoration selects the saved section/version and sets offset/speed without auto
 Tests cover splitting/order/cache reuse/duplicates, cancellation and partial retry, ambiguous submissions, snapshot changes, WAV format verification and atomic replacement, backend restart, and versioned progress. A live Voicebox 0.5.0/Kokoro test on 2026-09-12 produced a verified two-chunk, 4.525-second chapter. A restarted isolated backend served identical audio and range responses and restored progress with all Voicebox HTTP access blocked. No browser tooling was available; audible playback, continuation, and physically closing Voicebox remain explicit manual checks in README.
 
 Saved audio needs our backend (and Vite during development), but no Voicebox connection. This milestone does not add PWA/phone downloads, cloud deployment, cache eviction, audiobook export UI, text scroll bookmarks, or word-level highlighting.
+
+
+## Milestone 5A: responsive UI and opt-in LAN access
+
+`App.tsx` wraps all page navigation in `PlaybackProvider`. A single native audio element belongs to this provider rather than to a reader or generation panel. Source selection is explicit; returning to the bookshelf, changing reading sections, and collapsing native `details` elements do not replace the element/source. Paragraph and chapter playback share it. No backend schema, queue, generation contract, or audio cache changes were needed.
+
+`ChapterAudio` continues polling existing persistent jobs even when its disclosure is closed, and reports state/count in the summary. It restores saved reading section/version once per book without replacing existing active audio. Explicit Load actions fetch the latest backend progress. `Playback` owns periodic and lifecycle saves, exact audio-version selection, and automatic next-ready audio lookup in spine order for the same voice/model. Asynchronous next/load results are guarded against newer selections. It never automatically generates missing audio. Native controls reflect actual paused/playing/buffering state; rejected programmatic continuation has a visible message. Native dialogs are unnecessary: chapter selection uses a native select, and panels use details/summary with normal keyboard focus.
+
+Resume stores only a last-listened book ID in optional browser local storage. SQLite remains authoritative for offset, version and speed. A page refresh on the bookshelf can restore that book’s saved audio, while a direct reader URL restores its own book. Restoration is passive; no sound starts. Progress writes use monotonically increasing timestamps as before, and skip untouched metadata seeks. Saves run every five seconds during playback, on pause/seek/rate changes, and best-effort on pagehide/visibilitychange. Multiple tabs/devices remain independent players and share the latest backend position; 5A adds no cross-device playback lock. Paragraph playback position remains ephemeral.
+
+CSS reserves the fixed bottom player’s measured height with ResizeObserver and safe-area insets. The dock can scroll in short landscape windows. Controls use minimum 44px targets where controlled by our CSS, 16px form text, visible focus, wrapping labels, and single-column narrow-screen forms. Browser-native media control dimensions remain browser-owned. Generation disclosure state and reader font size are session UI state, not new persisted records.
+
+Network path: phone → Vite LAN port 5173 → `/api` proxy → FastAPI loopback port 8000 → Voicebox loopback port 17493 (only when generating). Relative media URLs also pass through Vite, including Range headers. The `dev:lan` command overrides only Vite’s bind address; the default dev/preview binding and Vite host/CORS restrictions remain intact. LAN access is opt-in on a trusted network; any reachable device can access this unauthenticated app through the proxy. It is not a deployment or secure-origin PWA environment.
+
+Verification: eight jsdom/media-mock tests cover shared player lifecycle and persistence/continuation, alongside the existing 58 backend tests and frontend build. The LAN frontend HTML and proxied health response were checked from the Mac via its LAN address on temporary port 5174. No real-browser layout, mobile emulation, actual phone playback, backgrounding, or lock-screen checks were available; README supplies the device checklist. Prior live Voicebox evidence remains milestone 4 evidence. No new narration was necessary for this UI milestone.
