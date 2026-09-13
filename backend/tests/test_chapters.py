@@ -209,3 +209,90 @@ def test_profile_changes_do_not_mix_voices_within_job(chapter_client):
     failed = wait(client, job, 'failed')
     assert failed['completed'] == 1
     assert len(mock.posts) == 1
+
+
+def generate_book(client, uploaded):
+    return client.post(f'/api/books/{uploaded["id"]}/chapters',
+                       json={'profile_id': 'voice-one', 'model_name': 'kokoro'})
+
+
+def test_generate_book_order_duplicates_and_global_concurrency(chapter_client):
+    client, mock = chapter_client
+    mock.history_state = 'generating'
+    uploaded = book(client)
+    with ThreadPoolExecutor(max_workers=3) as pool:
+        responses = list(pool.map(lambda _: generate_book(client, uploaded), range(3)))
+    assert all(r.status_code == 202 for r in responses)
+    plans = [r.json()['results'] for r in responses]
+    assert [row['section_id'] for row in plans[0]] == [s['id'] for s in uploaded['sections']]
+    assert len({tuple(row['job']['id'] for row in plan) for plan in plans}) == 1
+    deadline = time.monotonic() + 3
+    while not mock.posts and time.monotonic() < deadline:
+        time.sleep(.01)
+    time.sleep(.1)
+    assert len(mock.posts) == 1
+    mock.history_state = 'completed'
+    for row in plans[0]:
+        wait(client, row['job'])
+    count = len(mock.posts)
+    repeated = generate_book(client, uploaded).json()['results']
+    assert [row['job']['id'] for row in repeated] == [row['job']['id'] for row in plans[0]]
+    assert len(mock.posts) == count
+
+
+def test_generate_book_partial_eligibility_and_safe_retry(chapter_client):
+    from app.models import TextBlock
+    client, mock = chapter_client
+    uploaded = book(client)
+    second = uploaded['sections'][1]['id']
+    with Session(client.app.state.engine) as session, session.begin():
+        block = session.query(TextBlock).filter_by(section_id=second).first()
+        original = block.text
+        block.text = 'x' * 2000
+    result = generate_book(client, uploaded).json()['results']
+    assert result[0]['job'] and result[1]['job'] is None
+    assert 'word' in result[1]['error']
+    ready = wait(client, result[0]['job'])
+    with Session(client.app.state.engine) as session, session.begin():
+        block = session.query(TextBlock).filter_by(section_id=second).first()
+        block.text = original
+    retried = generate_book(client, uploaded).json()['results']
+    assert retried[0]['job']['id'] == ready['id']
+    assert retried[1]['job']
+    assert client.get(ready['audio_url']).status_code == 200
+
+
+def test_generate_book_snapshot_cache_identity_and_cancelled_jobs(chapter_client):
+    client, mock = chapter_client
+    uploaded = book(client)
+    mock.history_state = 'generating'
+    results = generate_book(client, uploaded).json()['results']
+    with Session(client.app.state.engine) as session:
+        jobs = [session.get(ChapterJob, row['job']['id']) for row in results]
+        assert len({j.request_json for j in jobs}) == len({j.identity_json for j in jobs}) == 1
+    second = results[1]['job']
+    client.post(f'/api/chapters/{second["id"]}/cancel')
+    repeated = generate_book(client, uploaded).json()['results']
+    assert repeated[1]['job']['id'] == second['id']
+    assert repeated[1]['job']['state'] == 'cancelled'
+    mock.history_state = 'completed'
+    ready = wait(client, results[0]['job'])
+    mock.profiles[0]['updated_at'] = '2026-09-13T01:00:00Z'
+    changed = generate_book(client, uploaded).json()['results']
+    assert changed[0]['job']['id'] != ready['id']
+    assert client.get(ready['audio_url']).status_code == 200
+    head = client.head(ready['audio_url'])
+    assert head.status_code == 200 and head.content == b''
+    assert int(head.headers['content-length']) == len(client.get(ready['audio_url']).content)
+
+
+def test_generate_book_offline_preserves_ready_audio_and_rejects_implicit_replace(chapter_client):
+    client, mock = chapter_client
+    uploaded = book(client)
+    ready = wait(client, create(client, uploaded['sections'][0]['id']).json())
+    assert client.post(f'/api/books/{uploaded["id"]}/chapters',
+        json={'profile_id': 'voice-one', 'model_name': 'kokoro', 'replace': True}).status_code == 422
+    mock.offline = True
+    assert generate_book(client, uploaded).status_code == 503
+    assert client.get(ready['audio_url']).status_code == 200
+    assert len(client.get(f'/api/chapters?book_id={uploaded["id"]}').json()) == 1

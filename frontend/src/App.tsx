@@ -4,6 +4,7 @@ import Bookshelf from './Bookshelf';
 import Reader from './Reader';
 import PlaybackProvider from './Playback';
 import OfflineLibrary, { DownloadActivity } from './OfflineLibrary';
+import BatchDownloads from './BatchDownloads';
 import DeviceStatus from './DeviceStatus';
 import PwaStatus from './PwaStatus';
 
@@ -30,6 +31,7 @@ export default function App() {
       </header>
       <DeviceStatus />
       <DownloadActivity />
+      <BatchDownloads />
       <PwaStatus />
       {route === 'downloads' || downloadId ? <OfflineLibrary downloadId={downloadId} /> : bookId ? <Reader key={bookId} bookId={bookId} requestedSection={params.get('section')} /> : <Bookshelf />}
       <footer>Server books stay on your laptop. Explicit device downloads can be read and heard offline.</footer>

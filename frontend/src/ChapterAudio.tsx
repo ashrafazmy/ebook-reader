@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
 import { api, errorMessage, type BookDetail } from './api';
+import { startBatch, readyBookVersions } from './downloadBatch';
 import { DownloadControl } from './OfflineLibrary';
 import { useOnline } from './useOnline';
 import { readProgress } from './progress';
@@ -21,6 +22,8 @@ export default function ChapterAudio({ book, sectionId, navigate, onStatus, rest
   const [connection, setConnection] = useState('Checking Voicebox…');
   const [error, setError] = useState('');
   const playback = usePlayback();
+  const [bookBusy, setBookBusy] = useState(false);
+  const [bookResult, setBookResult] = useState('');
   const [busy, setBusy] = useState(false);
   const [refresh, setRefresh] = useState(0);
   const [voiceRefresh, setVoiceRefresh] = useState(0);
@@ -114,6 +117,25 @@ export default function ChapterAudio({ book, sectionId, navigate, onStatus, rest
     finally { setBusy(false); }
   }
 
+  async function generateBook() {
+    setBookBusy(true); setBookResult(''); setError('');
+    // Serialize selected values now; later UI changes cannot modify the server snapshot.
+    const payload = JSON.stringify({ profile_id: profileId, model_name: modelId });
+    try {
+      const result = await api<{ results: { section_id: string; job: Job | null; error: string | null }[] }>(`/books/${book.id}/chapters`, {
+        method: 'POST', headers: { 'Content-Type': 'application/json' }, body: payload,
+      });
+      const failures = result.results.filter((item) => item.error);
+      setBookResult(`${result.results.length - failures.length} chapters queued or already tracked; ${failures.length} not submitted.` +
+        failures.map((item) => ` ${book.sections.find((s) => s.id === item.section_id)?.title}: ${item.error}`).join(''));
+      setRefresh((value) => value + 1);
+    } catch (error) { setBookResult(`${errorMessage(error)} Some chapters may already be queued. Retry Generate all chapters safely; matching jobs are reused.`); }
+    finally { setBookBusy(false); }
+  }
+  const readyVersions = readyBookVersions(book, jobs);
+  const selectedJobs = book.sections.map((section) => jobs.find((item) => item.section_id === section.id && item.profile_id === profileId && item.model_name === modelId));
+  const count = (...states: string[]) => selectedJobs.filter((item) => item && states.includes(item.state)).length;
+
   const inProgress = job && ['queued', 'generating', 'assembling'].includes(job.state);
   return <aside className="narration-panel" aria-label="Chapter audiobook">
     <h2>Chapter audiobook</h2>
@@ -123,6 +145,20 @@ export default function ChapterAudio({ book, sectionId, navigate, onStatus, rest
       <label>Voice<select value={profileId} onChange={(e) => setProfileId(e.target.value)}><option value="">Choose voice</option>{voices.map((v) => <option key={v.id} value={v.id}>{v.name}</option>)}</select></label>
       <label>Model<select value={modelId} onChange={(e) => setModelId(e.target.value)}><option value="">Choose model</option>{voice?.models.map((m) => <option key={m.id} value={m.id}>{m.name}{m.downloaded ? '' : ' — not downloaded'}</option>)}</select></label>
     </div>
+    <details className="book-audio-actions">
+      <summary>Whole book audio</summary>
+      <p>Generate missing chapters using the Voice and Model selected above, with the existing generation defaults. Submitted settings are fixed. Existing audio is retained; use Generate replacement on a chapter to replace it.</p>
+      <button disabled={!online || bookBusy || !model?.downloaded} onClick={() => void generateBook()}>{bookBusy ? 'Queuing chapters…' : 'Generate all chapters'}</button>
+      <p role="status">For selected voice/model: {count('ready')} completed · {count('queued')} queued · {count('generating', 'assembling')} running · {count('failed')} failed · {count('cancelled')} cancelled · {selectedJobs.filter((j) => !j).length} missing</p>
+      <p>Open a chapter to use its existing retry/cancel controls. Failed and cancelled jobs are retained until explicitly retried.</p>
+      <div className="book-job-list">{book.sections.map((section, index) => <button className="secondary" key={section.id} onClick={() => navigate(section.id)}>{section.title} · {selectedJobs[index]?.state ?? 'missing'}</button>)}</div>
+      {bookResult && <p role="status">{bookResult}</p>}
+      <p>{readyVersions.length} of {book.sections.length} chapters have ready audio; {book.sections.length - readyVersions.length} unavailable. Downloads choose the newest ready version of each chapter, across voices. Earlier device versions are retained.</p>
+      <button disabled={!online || !readyVersions.length} onClick={() => { setError(''); void startBatch(book, jobs).catch((error) => setError(errorMessage(error))); }}>
+        {readyVersions.length === book.sections.length ? 'Download audiobook' : 'Download all available audio'}
+      </button>
+      <p>Transfers run one chapter at a time. Batch progress and Continue download appear above the reader.</p>
+    </details>
     <div className="narration-actions">
       <button disabled={!online || busy || !!inProgress || !model?.downloaded} onClick={() => void action('generate')}>Generate chapter</button>
       <button className="secondary" disabled={!online || busy || !!inProgress || !model?.downloaded} onClick={() => void action('replace')}>Generate replacement</button>

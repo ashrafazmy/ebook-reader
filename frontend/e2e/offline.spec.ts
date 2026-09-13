@@ -212,3 +212,59 @@ test('offline player follows adjacent order, exposes gaps and selects exact down
   await expect(page.locator('.playback-dock')).toContainText('Press Play to continue');
   expect(await audio.evaluate((el: HTMLAudioElement) => el.paused)).toBe(true);
 });
+
+test('book actions preserve single downloads and snapshot only currently ready versions across navigation', async ({ page, context }) => {
+  const sections = [0, 1, 2].map((position) => ({ ...book.sections[0], id: `batch-s${position}`, title: `Original title ${position}`, position, spine_position: position }));
+  const batchBook = { ...book, sections, section_count: 3 };
+  const versions = sections.map((s, i) => ({ ...job, id: `batch-v${i}`, section_id: s.id, audio_url: `/api/chapter-audio/batch-${i}`, state: i === 2 ? 'queued' : 'ready' }));
+  const downloaded: string[] = [];
+  let submitBody: unknown;
+  let release: (() => void) | undefined;
+  await context.route('**/api/**', async (route) => {
+    const path = new URL(route.request().url()).pathname;
+    if (path.startsWith('/api/chapter-audio/')) {
+      if (route.request().method() === 'HEAD') { await route.fulfill({ headers: { 'Content-Length': String(wav().length) }, body: '' }); return; }
+      downloaded.push(path);
+      if (path.endsWith('batch-1')) await new Promise<void>((resolve) => { release = resolve; });
+      await route.fulfill({ contentType: 'audio/wav', body: wav() }); return;
+    }
+    const s = sections.find((s) => path.endsWith(`/sections/${s.id}`));
+    let body: unknown = s ? { ...section, ...s } : path === '/api/books/book' ? batchBook : path === '/api/chapters' ? versions
+      : path.endsWith('/listening-progress') ? null : path === '/api/books' ? [batchBook] : { status: 'ok' };
+    if (path.endsWith('/profiles')) body = { profiles: [{ id: 'voice', name: 'Test voice', models: [{ id: 'model', name: 'Model', downloaded: true }] }] };
+    if (path === '/api/books/book/chapters') {
+      submitBody = route.request().postDataJSON();
+      body = { results: versions.map((job) => ({ section_id: job.section_id, job, error: null })) };
+    }
+    await route.fulfill({ json: body });
+  });
+  await page.goto('/#book=book');
+  await page.locator('.generation-details > summary').click();
+  await page.getByRole('button', { name: 'Download for offline', exact: true }).click();
+  await expect(page.getByText(/^Available offline/)).toBeVisible();
+  await page.locator('.book-audio-actions > summary').click();
+  await page.getByRole('button', { name: 'Generate all chapters', exact: true }).click();
+  await expect(page.getByText(/3 chapters queued or already tracked/)).toBeVisible();
+  expect(submitBody).toEqual({ profile_id: 'voice', model_name: 'model' });
+  await expect(page.getByText(/2 completed · 1 queued/)).toBeVisible();
+  await page.getByRole('button', { name: 'Download all available audio', exact: true }).click();
+  await expect.poll(() => !!release).toBe(true);
+  versions[2].state = 'ready'; // Not part of the plan already saved on this device.
+  await page.goto('/#downloads');
+  await expect(page.locator('.batch-downloads > summary')).toContainText('1 / 2 chapters downloaded');
+  release!();
+  await expect(page.locator('.batch-downloads > summary')).toContainText('2 / 2 chapters downloaded · completed');
+  expect(downloaded).toEqual(['/api/chapter-audio/batch-0', '/api/chapter-audio/batch-1']);
+  await page.reload(); await expect(page.locator('.batch-downloads > summary')).toContainText('2 / 2');
+  await page.goto('/#book=book'); await page.locator('.generation-details > summary').click(); await page.locator('.book-audio-actions > summary').click();
+  await page.getByRole('button', { name: 'Download audiobook', exact: true }).click();
+  await expect(page.locator('.batch-downloads > summary')).toContainText('3 / 3 chapters downloaded · completed');
+  expect(downloaded).toEqual(['/api/chapter-audio/batch-0', '/api/chapter-audio/batch-1', '/api/chapter-audio/batch-2']);
+  await context.unrouteAll(); await context.setOffline(true);
+  await page.goto('/#download=batch-v2');
+  await expect(page.getByRole('article')).toContainText(section.blocks[0].text);
+  await page.getByRole('button', { name: 'Load downloaded chapter in player' }).click();
+  await expect(page.locator('audio')).toHaveAttribute('src', /^blob:/);
+  await page.setViewportSize({ width: 320, height: 844 });
+  expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
+});

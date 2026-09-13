@@ -1,11 +1,11 @@
 /** Device-only storage. Audio and metadata publish in one IndexedDB transaction. */
 export const DB_NAME = 'epub-reader-device';
-const stores = ['downloads', 'audio', 'progress', 'positions'] as const;
+const stores = ['downloads', 'audio', 'progress', 'positions', 'download_batches'] as const;
 export type StoreName = typeof stores[number];
 export function openDeviceDB(): Promise<IDBDatabase> {
   return new Promise((resolve, reject) => {
     if (!globalThis.indexedDB) { reject(new Error('Device storage is unavailable in this browser.')); return; }
-    const request = indexedDB.open(DB_NAME, 2);
+    const request = indexedDB.open(DB_NAME, 3);
     request.onupgradeneeded = () => { for (const name of stores) if (!request.result.objectStoreNames.contains(name)) request.result.createObjectStore(name); };
     request.onerror = () => reject(request.error);
     request.onblocked = () => reject(new Error('Close other reader tabs to open device storage.'));
@@ -17,7 +17,7 @@ export async function transaction<T>(names: StoreName[], mode: IDBTransactionMod
   return new Promise((resolve, reject) => {
     const tx = db.transaction(names, mode); let value: T;
     tx.oncomplete = () => { db.close(); resolve(value); };
-    tx.onabort = tx.onerror = () => { db.close(); reject(tx.error ?? new Error('Device storage transaction failed.')); };
+    tx.onabort = tx.onerror = () => { db.close(); reject(tx.error?.message ? tx.error : new Error('Device storage transaction failed. Free storage or check browser permissions, then retry.')); };
     try { run(tx, (next) => { value = next; }); } catch (error) { tx.abort(); reject(error); }
   });
 }

@@ -1,3 +1,4 @@
+import { startBatch, continueBatch, cancelBatch, readyBookVersions, type DownloadBatch } from './downloadBatch';
 import { beforeEach, afterEach, expect, it, vi } from 'vitest';
 import { IDBFactory, IDBObjectStore } from 'fake-indexeddb';
 import { all, change, get, transaction } from './device-db';
@@ -164,4 +165,84 @@ it('restores individual version history when the latest book position belongs to
   expect((await readVersionProgress(book.id, version.id, true))?.offset).toBe(2);
   expect((await readVersionProgress(book.id, 'second', true))?.offset).toBe(7);
   expect(await readVersionProgress(book.id, 'regenerated', true)).toBeNull();
+});
+
+const batchBook: BookDetail = { ...book, section_count: 3, sections: [0, 1, 2].map((position) => ({ ...book.sections[0], id: `section-${position}`, position, title: `Stored title ${position}` })) };
+const batchVersions = batchBook.sections.map((s, i) => ({ ...version, id: `version-${i}`, section_id: s.id, audio_url: `/api/chapter-audio/audio-${i}` }));
+function batchFetch() {
+  fetchMock.mockImplementation(async (url: string, options?: RequestInit) => {
+    const s = batchBook.sections.find((s) => url.endsWith(`/sections/${s.id}`));
+    return s ? json({ ...section, ...s }) : new Response(options?.method === 'HEAD' ? null : wav(), { headers: { 'Content-Length': '244' } });
+  });
+}
+const audioGets = () => fetchMock.mock.calls.filter(([url, options]) => url.includes('/chapter-audio/') && options?.method !== 'HEAD').map(([url]) => url);
+it('batch chooses newest ready versions in book order and skips valid exact copies', async () => {
+  batchFetch();
+  expect(readyBookVersions(batchBook, [...batchVersions].reverse()).map((v) => v.id)).toEqual(batchVersions.map((v) => v.id));
+  await downloadChapter(batchBook, batchVersions[0]); fetchMock.mockClear();
+  await startBatch(batchBook, [...batchVersions].reverse());
+  expect(audioGets()).toEqual(batchVersions.slice(1).map((v) => v.audio_url));
+  expect(await get<DownloadBatch>('download_batches', book.id)).toMatchObject({ state: 'completed', completed: batchVersions.map((v) => v.id) });
+});
+it('batch cancellation completes the current chapter, then resumes remaining work without duplicates', async () => {
+  batchFetch(); const original = fetchMock.getMockImplementation()!;
+  let release!: (response: Response) => void;
+  fetchMock.mockImplementation((url, options) => url === batchVersions[0].audio_url && options?.method !== 'HEAD'
+    ? new Promise((resolve) => { release = resolve; }) : original(url, options));
+  const pending = startBatch(batchBook, batchVersions);
+  await vi.waitFor(() => expect(release).toBeDefined());
+  await expect(startBatch(batchBook, batchVersions)).rejects.toThrow('already running');
+  await cancelBatch(book.id); release(new Response(wav(), { headers: { 'Content-Length': '244' } })); await pending;
+  expect(audioGets()).toEqual([batchVersions[0].audio_url]);
+  expect(await get<DownloadBatch>('download_batches', book.id)).toMatchObject({ state: 'cancelled', completed: [batchVersions[0].id] });
+  batchFetch(); fetchMock.mockClear(); await continueBatch(book.id);
+  expect(audioGets()).toEqual(batchVersions.slice(1).map((v) => v.audio_url));
+});
+it('batch retains partial successes and retries only failed chapters', async () => {
+  batchFetch(); Object.defineProperty(navigator, 'onLine', { value: true }); const original = fetchMock.getMockImplementation()!;
+  fetchMock.mockImplementation((url, options) => url === batchVersions[1].audio_url && options?.method !== 'HEAD' ? Promise.resolve(new Response('', { status: 503 })) : original(url, options));
+  await startBatch(batchBook, batchVersions);
+  expect(await get<DownloadBatch>('download_batches', book.id)).toMatchObject({ state: 'partial', completed: [batchVersions[0].id, batchVersions[2].id] });
+  batchFetch(); fetchMock.mockClear(); await continueBatch(book.id);
+  expect(audioGets()).toEqual([batchVersions[1].audio_url]);
+  expect((await get<DownloadBatch>('download_batches', book.id))?.state).toBe('completed');
+});
+it('reopening reconstructs unfinished work from its fixed persisted versions', async () => {
+  batchFetch(); await downloadChapter(batchBook, batchVersions[0]);
+  await change<DownloadBatch>('download_batches', book.id, () => ({ book: batchBook, versions: batchVersions.slice(0, 2), state: 'running', completed: [], errors: {}, sizes: {} }));
+  fetchMock.mockClear(); await continueBatch(book.id);
+  expect(audioGets()).toEqual([batchVersions[1].audio_url]);
+  expect((await get<DownloadBatch>('download_batches', book.id))?.versions).toHaveLength(2);
+});
+it('batch size preflight rejects insufficient storage and continuation can recover', async () => {
+  batchFetch(); vi.stubGlobal('navigator', { onLine: false, storage: { estimate: async () => ({ quota: 400, usage: 0 }) } });
+  await startBatch(batchBook, batchVersions);
+  expect(audioGets()).toHaveLength(0);
+  expect((await get<DownloadBatch>('download_batches', book.id))?.error).toMatch(/Not enough device storage/);
+  vi.stubGlobal('navigator', { onLine: false, storage: { estimate: async () => ({ quota: 10000, usage: 0 }) } });
+  await continueBatch(book.id); expect((await get<DownloadBatch>('download_batches', book.id))?.state).toBe('completed');
+});
+it('a changed audio version is downloaded separately and preserves the old device version', async () => {
+  batchFetch(); await startBatch(batchBook, [batchVersions[0]]);
+  const replacement = { ...batchVersions[0], id: 'replacement' };
+  fetchMock.mockClear(); await startBatch(batchBook, [replacement, ...batchVersions]);
+  expect((await readDownload(batchVersions[0].id)).item.state).toBe('ready');
+  expect((await readDownload(replacement.id)).item.state).toBe('ready');
+  expect((await get<DownloadBatch>('download_batches', book.id))?.versions[0].id).toBe('replacement');
+});
+it('a quota error after successful preflight preserves completed downloads', async () => {
+  batchFetch(); const original = IDBObjectStore.prototype.put;
+  vi.spyOn(IDBObjectStore.prototype, 'put').mockImplementation(function (this: IDBObjectStore, value, key) {
+    if (this.name === 'audio' && key === batchVersions[1].id) throw new DOMException('Quota exceeded', 'QuotaExceededError');
+    return original.call(this, value, key);
+  });
+  await startBatch(batchBook, batchVersions);
+  expect((await readDownload(batchVersions[0].id)).item.state).toBe('ready');
+  expect((await get<DownloadBatch>('download_batches', book.id))?.state).toBe('partial');
+  expect((await get<DownloadBatch>('download_batches', book.id))?.errors[batchVersions[1].id]).toMatch(/storage|transaction/i);
+});
+it('a batch held in another tab cannot be submitted again', async () => {
+  vi.stubGlobal('navigator', { locks: { request: async (_name: string, _options: unknown, work: (lock: null) => Promise<void>) => work(null) } });
+  await expect(startBatch(batchBook, batchVersions)).rejects.toThrow('another tab');
+  expect(await get<DownloadBatch>('download_batches', book.id)).toBeUndefined();
 });

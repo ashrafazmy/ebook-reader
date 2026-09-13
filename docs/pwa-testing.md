@@ -124,3 +124,13 @@ Run `uv run pytest` from `backend/` for the existing generation/cache/assembly/r
 Local history now retains positions for previously selected audio versions; the server still synchronizes one latest position per book. No offset is copied to a regenerated audio version. The additive browser storage upgrade preserves prior downloads; close other old reader windows if an upgrade is blocked.
 
 Follow-up verification: stream tests cover known/unknown totals, partial transfer failure and retry. The multi-chapter Chromium test covers adjacent chapters, gaps, exact local text, per-version position/speed, playing/paused selection, rejected playback, missing Blobs and long titles. These use synthetic audio and simulated offline conditions, not an installed phone in airplane mode.
+
+## 5B.1 batch checks on a phone
+
+Use the private HTTPS startup and update steps above. In a book, expand Chapter audio → Whole book audio. Generate all uses the selected voice/model. Download all available audio snapshots only currently ready versions; Download audiobook appears when every section is ready.
+
+Download a chapter individually first, then start the book download. Confirm it is skipped and progress remains visible after navigation. Expand the global batch summary for known remaining size, per-chapter errors, cancellation and Continue download. Cancel after the current chapter, reopen and continue: completed copies should not transfer again. Closing mid-file requires that file to restart on Continue.
+
+Generate another chapter during a partial download: it must not enter the existing plan automatically. A subsequent explicit book download action picks it up. Regenerated versions are saved separately and old copies remain. Finish downloading before airplane-mode cold-start, seeking, speed, resume and reconnect checks. Actual phone suspension, memory/storage limits and lock-screen behavior are not verified by desktop Chromium automation.
+
+5B.1 automated result: 62 backend tests, 39 frontend tests, six production Chromium tests and the build passed. The added browser case verifies the whole-book controls, reuse of an individually downloaded copy, a fixed ready-version snapshot across navigation, a later batch picking up newly ready audio, and offline playback at 320 CSS pixels. This is mocked API/synthetic WAV testing on the laptop, not actual phone airplane-mode testing.

@@ -18,7 +18,7 @@ from sqlalchemy.dialects.sqlite import insert
 from app.chapter_audio import assemble_wav, split_block
 from app.models import Book, ChapterChunk, ChapterJob, ListeningProgress, Narration, Section
 from app.narration import canonical
-from app.voicebox import ProviderError
+from app.voicebox import Profile, ProviderError
 
 router = APIRouter(prefix="/api", tags=["chapter audio"])
 logger = logging.getLogger(__name__)
@@ -30,6 +30,12 @@ class ChapterRequest(BaseModel):
     profile_id: str
     model_name: str
     replace: bool = False
+
+
+class BookChapterRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    profile_id: str
+    model_name: str
 
 
 class RetryRequest(BaseModel):
@@ -78,7 +84,7 @@ class ChapterService:
             with suppress(asyncio.CancelledError):
                 await self.task
 
-    async def create(self, data: ChapterRequest) -> dict:
+    async def create(self, data: ChapterRequest, snapshot: tuple[int, dict, dict, Profile] | None = None) -> dict:
         with Session(self.engine) as session:
             section = session.get(Section, str(data.section_id))
             if section is None:
@@ -87,18 +93,24 @@ class ChapterService:
             active = session.scalar(select(ChapterJob).where(
                 ChapterJob.section_id == str(data.section_id), ChapterJob.profile_id == data.profile_id,
                 ChapterJob.model_name == data.model_name, ChapterJob.state.in_(["queued", "generating", "assembling"])))
-            if active:
+            if active and snapshot is None:
                 return job_view(active)
-        info = await self.narration.provider.discovery()
-        limit = min(self.settings.chapter_chunk_chars, info["text_limit"])
+        if snapshot is None:
+            info = await self.narration.provider.discovery()
+            limit = min(self.settings.chapter_chunk_chars, info["text_limit"])
+        else:
+            limit = snapshot[0]
         try:
             chunks = [span for block_id, text in blocks for span in split_block(block_id, text, limit)]
         except ValueError as exc:
             raise HTTPException(400, str(exc)) from exc
         if not chunks:
             raise HTTPException(400, "This section has no readable text.")
-        payload, identity, profile = await self.narration.provider.prepare(data.profile_id, data.model_name, chunks[0]["text"])
-        payload.pop("text")
+        if snapshot is None:
+            payload, identity, profile = await self.narration.provider.prepare(data.profile_id, data.model_name, chunks[0]["text"])
+            payload.pop("text")
+        else:
+            _, payload, identity, profile = snapshot
         key = hashlib.sha256(canonical({"section": str(data.section_id), "chunks": chunks,
                                        "settings": payload, "identity": identity}).encode()).hexdigest()
         async with self.narration.lock:
@@ -118,6 +130,37 @@ class ChapterService:
                 session.add(job)
                 session.flush()
                 return job_view(job)
+
+    async def create_book(self, book_id: str, data: BookChapterRequest) -> dict:
+        with Session(self.engine) as session:
+            if session.get(Book, book_id) is None:
+                raise HTTPException(404, "Book not found.")
+            sections = [(section.id, [(b.id, b.text) for b in section.blocks])
+                        for section in session.scalars(select(Section).where(
+                            Section.book_id == book_id).order_by(Section.position))]
+        info = await self.narration.provider.discovery()
+        limit = min(self.settings.chapter_chunk_chars, info["text_limit"])
+        results, snapshot = [], None
+        # Each ordinary chapter commits independently. Retrying a lost/partial response
+        # finds the same unique cache keys; failed jobs still need explicit chapter retry.
+        for section_id, blocks in sections:
+            try:
+                spans = [span for block_id, text in blocks for span in split_block(block_id, text, limit)]
+                if not spans:
+                    raise ValueError("This section has no readable text.")
+                if snapshot is None:
+                    payload, identity, profile = await self.narration.provider.prepare(
+                        data.profile_id, data.model_name, spans[0]["text"])
+                    payload.pop("text")
+                    snapshot = (limit, payload, identity, profile)
+                job = await self.create(ChapterRequest(section_id=section_id,
+                    profile_id=data.profile_id, model_name=data.model_name), snapshot=snapshot)
+                results.append({"section_id": section_id, "job": job, "error": None})
+            except (ValueError, HTTPException, ProviderError) as exc:
+                message = str(exc.detail) if isinstance(exc, HTTPException) else str(exc)
+                results.append({"section_id": section_id, "job": None, "error": message})
+            await asyncio.sleep(0)  # Large books must not monopolize the event loop.
+        return {"results": results, "profile_id": data.profile_id, "model_name": data.model_name}
 
     def action(self, job_id: str, cancel: bool, confirm_unknown: bool = False):
         with Session(self.engine) as session, session.begin():
@@ -238,6 +281,14 @@ async def create_chapter(data: ChapterRequest, request: Request):
         raise HTTPException(503, str(exc)) from exc
 
 
+@router.post("/books/{book_id}/chapters", status_code=202)
+async def create_book_chapters(book_id: UUID, data: BookChapterRequest, request: Request):
+    try:
+        return await request.app.state.chapters.create_book(str(book_id), data)
+    except ProviderError as exc:
+        raise HTTPException(503, str(exc)) from exc
+
+
 @router.get("/chapters")
 def list_chapters(book_id: UUID, request: Request):
     with Session(request.app.state.engine) as session:
@@ -274,6 +325,7 @@ async def retry_chapter(job_id: UUID, data: RetryRequest, request: Request):
     return request.app.state.chapters.action(str(job_id), False, data.confirm_unknown)
 
 
+@router.head("/chapter-audio/{audio_id}")
 @router.get("/chapter-audio/{audio_id}")
 def chapter_audio(audio_id: UUID, request: Request):
     with Session(request.app.state.engine) as session:
