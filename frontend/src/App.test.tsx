@@ -16,6 +16,26 @@ const baseJob = { id: 'chapter-job', section_id: 'section', profile_id: 'voice',
 let jobs: typeof baseJob[], offline: boolean, host: HTMLDivElement, root: Root;
 let progress: { version_id: string; section_id: string; offset: number; speed: number } | null;
 const fetchMock = vi.fn();
+function baseMock(url: string, options?: RequestInit) {
+  let value: unknown;
+  if (url === '/api/health') value = { status: 'ok' };
+  else if (url === '/api/books') value = [book];
+  else if (url === '/api/books/book') value = book;
+  else if (url === '/api/books/book/sections/section') value = { ...book.sections[0], blocks };
+  else if (url === '/api/books/book/listening-progress') {
+    if (options?.method === 'PUT') progress = { ...JSON.parse(options.body as string), section_id: 'section' };
+    value = progress;
+  } else if (url === '/api/chapters?book_id=book') value = [...jobs];
+  else if (url === '/api/voicebox/profiles') {
+    if (offline) throw new TypeError('Voicebox offline');
+    value = { profiles: [{ id: 'voice', name: 'Test voice', models: [{ id: 'model', name: 'Model', downloaded: true }] }] };
+  } else if (url === '/api/chapters' && options?.method === 'POST') { jobs = [{ ...baseJob }]; value = jobs[0]; }
+  else if (url === '/api/chapters/chapter-job/cancel') { jobs = [{ ...jobs[0], state: 'cancelled' }]; value = jobs[0]; }
+  else if (url === '/api/chapters/chapter-job/retry') { jobs = [{ ...jobs[0], state: 'queued' }]; value = jobs[0]; }
+  else if (url === '/api/chapters/failed-a/retry') { jobs = jobs.map((j) => ({ ...j, state: j.id === 'failed-a' ? 'queued' : j.state })); value = jobs.find((j) => j.id === 'failed-a'); }
+  else throw new Error(`Unexpected API call: ${url}`);
+  return { ok: true, json: async () => value };
+}
 function button(label: string) { return Array.from(host.querySelectorAll('button')).find((el) => el.textContent === label)!; }
 async function click(element: HTMLElement) { await act(async () => element.click()); }
 async function navigate(hash: string) {
@@ -30,25 +50,7 @@ beforeEach(() => {
   vi.spyOn(HTMLMediaElement.prototype, 'duration', 'get').mockReturnValue(120);
   localStorage.clear(); history.replaceState(null, '', location.pathname);
   jobs = []; progress = null; offline = false;
-  fetchMock.mockReset().mockImplementation(async (url: string, options?: RequestInit) => {
-    let value: unknown;
-    if (url === '/api/health') value = { status: 'ok' };
-    else if (url === '/api/books') value = [book];
-    else if (url === '/api/books/book') value = book;
-    else if (url === '/api/books/book/sections/section') value = { ...book.sections[0], blocks };
-    else if (url === '/api/books/book/listening-progress') {
-      if (options?.method === 'PUT') progress = { ...JSON.parse(options.body as string), section_id: 'section' };
-      value = progress;
-    } else if (url === '/api/chapters?book_id=book') value = [...jobs];
-    else if (url === '/api/voicebox/profiles') {
-      if (offline) throw new TypeError('Voicebox offline');
-      value = { profiles: [{ id: 'voice', name: 'Test voice', models: [{ id: 'model', name: 'Model', downloaded: true }] }] };
-    } else if (url === '/api/chapters' && options?.method === 'POST') { jobs = [{ ...baseJob }]; value = jobs[0]; }
-    else if (url === '/api/chapters/chapter-job/cancel') { jobs = [{ ...jobs[0], state: 'cancelled' }]; value = jobs[0]; }
-    else if (url === '/api/chapters/chapter-job/retry') { jobs = [{ ...jobs[0], state: 'queued' }]; value = jobs[0]; }
-    else throw new Error(`Unexpected API call: ${url}`);
-    return { ok: true, json: async () => value };
-  });
+  fetchMock.mockReset().mockImplementation(baseMock);
   vi.stubGlobal('fetch', fetchMock);
   host = document.createElement('div'); document.body.append(host); root = createRoot(host);
 });
@@ -79,6 +81,39 @@ it('keeps chapter generation, queued status, cancellation and retry wired to cha
   expect(button('Generate chapter').disabled).toBe(true);
   await click(button('Cancel remaining work')); expect(host.textContent).toContain('cancelled');
   await click(button('Retry / resume remaining work')); expect(host.querySelector('.generation-details > summary')?.textContent).toContain('queued');
+});
+it('retries every failed chapter for the selected voice and model without touching queued or ready work', async () => {
+  jobs = [
+    { ...baseJob, id: 'failed-a', section_id: 'section', state: 'failed', completed: 1, total: 2, error: 'synthetic failure' },
+    { ...baseJob, id: 'ready-b', section_id: 'section', state: 'ready', completed: 2, total: 2, audio_url: '/api/chapter-audio/ready' },
+  ] as unknown as typeof jobs;
+  await mount(); await navigate('#book=book');
+  await click(host.querySelector('.book-audio-actions > summary')!);
+  const retryAll = Array.from(host.querySelectorAll('button')).find((el) => el.textContent?.startsWith('Retry all failed chapters'))!;
+  expect(retryAll).toBeTruthy(); expect(retryAll.textContent).toContain('(1)');
+  await click(retryAll);
+  const retries = fetchMock.mock.calls.filter(([url, options]) => url === '/api/chapters/failed-a/retry' && options?.method === 'POST');
+  expect(retries).toHaveLength(1);
+  expect(JSON.parse(retries[0][1].body)).toEqual({ confirm_unknown: false });
+  expect(fetchMock.mock.calls.some(([url]) => url === '/api/chapters/ready-b/retry')).toBe(false);
+  expect(host.textContent).toContain('1 failed chapter resumed.');
+  jobs = [{ ...baseJob, id: 'failed-a', section_id: 'section', state: 'queued', completed: 1, total: 2 }] as typeof jobs;
+  await act(async () => { window.dispatchEvent(new HashChangeEvent('hashchange')); });
+  await expect.poll(() => host.querySelector('.generation-details > summary')?.textContent ?? '').toContain('queued · 1 of 2');
+});
+it('reports chapters that could not be retried, including the ambiguous-submission guard', async () => {
+  jobs = [{ ...baseJob, id: 'failed-a', section_id: 'section', state: 'failed', completed: 1, total: 2, error: 'ambiguous outcome' }] as unknown as typeof jobs;
+  fetchMock.mockImplementation(async (url, options?: RequestInit) => {
+    if (url === '/api/chapters/failed-a/retry' && options?.method === 'POST') {
+      return { ok: false, status: 409, json: async () => ({ detail: 'A chunk\'s submission outcome is unknown. Check Voicebox history, then explicitly confirm retrying unknown submissions.' }) };
+    }
+    return baseMock(url, options);
+  });
+  await mount(); await navigate('#book=book');
+  await click(host.querySelector('.book-audio-actions > summary')!);
+  await click(Array.from(host.querySelectorAll('button')).find((el) => el.textContent?.startsWith('Retry all failed chapters'))!);
+  expect(host.textContent).toContain('could not be retried');
+  expect(host.textContent).toContain('unknown');
 });
 
 it('restores one cached chapter player with Voicebox offline and retains it across real app navigation', async () => {

@@ -135,6 +135,22 @@ export default function ChapterAudio({ book, sectionId, navigate, onStatus, rest
   const readyVersions = readyBookVersions(book, jobs);
   const selectedJobs = book.sections.map((section) => jobs.find((item) => item.section_id === section.id && item.profile_id === profileId && item.model_name === modelId));
   const count = (...states: string[]) => selectedJobs.filter((item) => item && states.includes(item.state)).length;
+  const failedJobs = selectedJobs.filter((item): item is Job => !!item && item.state === 'failed');
+
+  async function retryAllFailed() {
+    if (!online) { setError('New generation and queue actions require a connection to your laptop.'); return; }
+    setBookBusy(true); setBookResult(''); setError('');
+    let retried = 0; const problems: string[] = [];
+    try {
+      for (const failed of failedJobs) {
+        try {
+          await api(`/chapters/${failed.id}/retry`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ confirm_unknown: false }) });
+          retried += 1;
+        } catch (error) { problems.push(`${book.sections.find((s) => s.id === failed.section_id)?.title}: ${errorMessage(error)}`); }
+      }
+      setBookResult(`${retried} failed chapter${retried === 1 ? '' : 's'} resumed.` + (problems.length ? ` ${problems.length} could not be retried. ${problems.join(' ')}` : ''));
+    } finally { setBookBusy(false); setRefresh((n) => n + 1); }
+  }
 
   const inProgress = job && ['queued', 'generating', 'assembling'].includes(job.state);
   return <aside className="narration-panel" aria-label="Chapter audiobook">
@@ -151,6 +167,8 @@ export default function ChapterAudio({ book, sectionId, navigate, onStatus, rest
       <button disabled={!online || bookBusy || !model?.downloaded} onClick={() => void generateBook()}>{bookBusy ? 'Queuing chapters…' : 'Generate all chapters'}</button>
       <p role="status">For selected voice/model: {count('ready')} completed · {count('queued')} queued · {count('generating', 'assembling')} running · {count('failed')} failed · {count('cancelled')} cancelled · {selectedJobs.filter((j) => !j).length} missing</p>
       <p>Open a chapter to use its existing retry/cancel controls. Failed and cancelled jobs are retained until explicitly retried.</p>
+      {failedJobs.length > 0 && <button className="secondary" disabled={!online || bookBusy} onClick={() => void retryAllFailed()}>{bookBusy ? 'Retrying failed chapters…' : `Retry all failed chapters (${failedJobs.length})`}</button>}
+      <p>Retrying resumes each failed chapter's remaining work through the existing per-chapter retry rules; completed chunks are kept. Chapters with unknown Voicebox outcomes are not resubmitted here — open those chapters and use their explicit confirmation.</p>
       <div className="book-job-list">{book.sections.map((section, index) => <button className="secondary" key={section.id} onClick={() => navigate(section.id)}>{section.title} · {selectedJobs[index]?.state ?? 'missing'}</button>)}</div>
       {bookResult && <p role="status">{bookResult}</p>}
       <p>{readyVersions.length} of {book.sections.length} chapters have ready audio; {book.sections.length - readyVersions.length} unavailable. Downloads choose the newest ready version of each chapter, across voices. Earlier device versions are retained.</p>
