@@ -28,6 +28,7 @@ export default function PlaybackProvider({ children }: { children: ReactNode }) 
   const [speed, setSpeed] = useState(1);
   const [notice, setNotice] = useState('');
   const [saveError, setSaveError] = useState('');
+  const [compact, setCompact] = useState(false);
   const touched = useRef(false);
   const timestamp = useRef(0);
   const lastSent = useRef(0);
@@ -160,11 +161,16 @@ export default function PlaybackProvider({ children }: { children: ReactNode }) 
 
   return <Context.Provider value={{ track, load, loadChapter }}>{children}
     {!track && notice && <p className="error" role="alert">{notice}</p>}
-    {track && <aside ref={dock} className="playback-dock" aria-label="Audio player">
+    {track && <aside ref={dock} className={`playback-dock${compact ? ' compact' : ''}`} aria-label="Audio player">
       <div className="playback-inner">
-        <div className="now-playing"><details className="playing-title"><summary aria-label={`${chapterLabel}. ${playingBook?.title}. Expand full playing title`}><strong>{chapterLabel}</strong><span>{playingBook?.title}</span></summary>
+        <div className={`now-playing${compact ? ' compact-now' : ''}`}>
+          <details className="playing-title"><summary aria-label={`${chapterLabel}. ${playingBook?.title}. Expand full playing title`}><strong>{chapterLabel}</strong><span>{playingBook?.title}</span></summary>
           <div className="playing-full-title" tabIndex={0} role="region" aria-label="Full playing chapter details"><p>{chapterLabel}</p><p>{playingBook?.title}</p><p>{track.chapter.version.profile_name} · {track.chapter.version.model_name} · version {track.id.slice(0, 8)}</p></div>
-        </details><a href={track.device ? `#download=${track.id}` : `#book=${track.chapter.book.id}&section=${track.chapter.version.section_id}`}>Open chapter</a></div>
+        </details>
+          <button className="secondary player-size" aria-expanded={!compact} aria-controls="playback-controls" aria-label={compact ? 'Expand audio player to full controls' : 'Minimize audio player to compact bar'} onClick={() => setCompact((value) => !value)}>{compact ? 'Expand' : 'Minimize'}</button>
+          {!compact && <a href={track.device ? `#download=${track.id}` : `#book=${track.chapter.book.id}&section=${track.chapter.version.section_id}`}>Open chapter</a>}
+        </div>
+        <div id="playback-controls" hidden={compact}>
         <label className="download-selector">Downloaded chapters
           <select aria-label="Downloaded chapters for playing book" value={choices.some((item) => item.id === track.id) ? track.id : ''} onChange={(e) => {
             const choice = choices.find((item) => item.id === e.target.value);
@@ -199,6 +205,7 @@ export default function PlaybackProvider({ children }: { children: ReactNode }) 
           {track.device && <span className="help">On device</span>}
           <button className="secondary" aria-label="Previous audio chapter" disabled={track.chapter.book.sections[0]?.id === track.chapter.version.section_id} onClick={() => void adjacent(-1)}>← Chapter</button><button className="secondary" aria-label="Next audio chapter" disabled={track.chapter.book.sections.at(-1)?.id === track.chapter.version.section_id} onClick={() => void adjacent(1)}>Chapter →</button>
           <label>Speed<select aria-label="Playback speed" value={speed} onChange={(e) => { const value = Number(e.target.value); setSpeed(value); if (audio.current) audio.current.playbackRate = value; touched.current = true; save(); }}>{[.5,.75,1,1.25,1.5,1.75,2,2.5,3].map((value) => <option key={value} value={value}>{value}×</option>)}</select></label>
+        </div>
         </div>
         {notice && <p role="status">{notice} <button className="secondary" onClick={() => { if (active.current && audio.current) { active.current.offset = audio.current.currentTime; active.current.speed = audio.current.playbackRate; } audio.current?.load(); }}>Reload audio</button></p>}
         {saveError && <p role="alert">{saveError} <button onClick={save}>Retry save</button></p>}

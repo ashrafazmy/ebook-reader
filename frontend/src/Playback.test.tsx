@@ -91,3 +91,44 @@ it('reports a failed progress save and retries against the same audio version', 
   const last = fetchMock.mock.calls.at(-1)!;
   expect(JSON.parse(last[1]!.body as string)).toMatchObject({ version_id: 'v1', offset: 12 });
 });
+async function sizeButton() { return Array.from(host.querySelectorAll('button')).find((button) => button.textContent === 'Minimize' || button.textContent === 'Expand')!; }
+it('minimizes to a compact bar without touching the audio element and restores all controls on expand', async () => {
+  await load(); const audio = player(); const src = audio.getAttribute('src');
+  const pausedMock = vi.spyOn(HTMLMediaElement.prototype, 'paused', 'get').mockReturnValue(false);
+  try {
+  await fire(audio, 'play'); audio.currentTime = 42; audio.playbackRate = 1.5;
+  let button = await sizeButton();
+  expect(button.getAttribute('aria-expanded')).toBe('true'); expect(button.getAttribute('aria-controls')).toBe('playback-controls');
+  await fire(button, 'click');
+  expect(host.querySelector('audio')).toBe(audio); expect(audio.getAttribute('src')).toBe(src);
+  expect(audio.paused).toBe(false); expect(audio.currentTime).toBe(42); expect(audio.playbackRate).toBe(1.5);
+  expect(host.querySelector('.playback-dock')!.className).toContain('compact');
+  expect((host.querySelector('#playback-controls') as HTMLElement)!.hidden).toBe(true);
+  for (const selector of ['select[aria-label="Downloaded chapters for playing book"]', 'select[aria-label="Playback speed"]', 'button[aria-label="Next audio chapter"]', 'button[aria-label="Previous audio chapter"]'])
+    expect((host.querySelector(selector)!.closest('#playback-controls') as HTMLElement)!.hidden).toBe(true);
+  expect(pauseMock).not.toHaveBeenCalled(); expect(playMock).not.toHaveBeenCalled(); expect(audio.getAttribute('src')).toBe(src);
+  button = await sizeButton(); expect(button.textContent).toBe('Expand'); expect(button.getAttribute('aria-expanded')).toBe('false');
+  await fire(button, 'click');
+  expect(host.querySelector('.playback-dock')!.className).not.toContain('compact');
+  expect((host.querySelector('#playback-controls') as HTMLElement)!.hidden).toBe(false);
+  expect(host.querySelector('audio')).toBe(audio); expect(audio.getAttribute('src')).toBe(src);
+  expect(audio.paused).toBe(false); expect(audio.currentTime).toBe(42); expect(audio.playbackRate).toBe(1.5);
+  expect(pauseMock).not.toHaveBeenCalled(); expect(playMock).not.toHaveBeenCalled();
+  } finally { pausedMock.mockRestore(); }
+});
+it('keeps the compact view across page navigation and keeps playback errors visible while minimized', async () => {
+  fetchMock.mockImplementation(async (url) => ({ ok: true, json: async () => url.includes('chapters?') ? [version, nextVersion] : null }));
+  const pausedMock = vi.spyOn(HTMLMediaElement.prototype, 'paused', 'get').mockReturnValue(false);
+  try {
+  await load(); const audio = player(); await fire(audio, 'play');
+  await fire(await sizeButton(), 'click');
+  await render('bookshelf'); await render('reader');
+  expect(host.querySelector('.playback-dock')!.className).toContain('compact');
+  expect((await sizeButton()).textContent).toBe('Expand');
+  expect(host.querySelector('audio')).toBe(audio); expect(audio.paused).toBe(false); expect(audio.getAttribute('src')).toBe(version.audio_url);
+  playMock.mockRejectedValueOnce(new Error('NotAllowedError'));
+  await fire(audio, 'ended'); await fire(player(), 'loadedmetadata');
+  expect(host.querySelector('.playback-dock')!.className).toContain('compact');
+  expect(host.querySelector('.playback-dock p[role="status"]')!.textContent).toContain('Press Play to continue');
+  } finally { pausedMock.mockRestore(); }
+});

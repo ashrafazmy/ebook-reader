@@ -94,6 +94,12 @@ input[type="checkbox"] { width: 24px; height: 24px; vertical-align: middle; marg
 .playback-tools label { display: flex; gap: 6px; align-items: center; margin-left: auto; font-size: .85rem; }
 .playback-tools select { width: 82px; padding: 8px; }
 .playback-dock p { font-size: .85rem; margin: 8px 0 0; }
+.player-size { flex-shrink: 0; }
+/* Compact bar: chapter title + expand + native controls only. The measured dock height shrinks via the existing ResizeObserver. */
+.playback-dock.compact .now-playing { font-size: .8rem; }
+.playback-dock.compact .now-playing .playing-title summary span { display: none; }
+.playback-dock.compact .playing-full-title { display: none; }
+.playback-dock.compact audio { margin-top: 0; }
 @media (max-width: 520px) {
   main { padding: 20px max(12px, env(safe-area-inset-right)) calc(var(--player-height, 0px) + 32px) max(12px, env(safe-area-inset-left)); }
   .app-header { gap: 8px; }
