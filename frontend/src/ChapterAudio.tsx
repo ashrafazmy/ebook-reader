@@ -136,6 +136,9 @@ export default function ChapterAudio({ book, sectionId, navigate, onStatus, rest
   const selectedJobs = book.sections.map((section) => jobs.find((item) => item.section_id === section.id && item.profile_id === profileId && item.model_name === modelId));
   const count = (...states: string[]) => selectedJobs.filter((item) => item && states.includes(item.state)).length;
   const failedJobs = selectedJobs.filter((item): item is Job => !!item && item.state === 'failed');
+  const sectionEntries = book.sections.map((section, index) => ({ section, job: selectedJobs[index] }));
+  const activeEntries = sectionEntries.filter((entry) => entry.job?.state !== 'ready');
+  const completedEntries = sectionEntries.filter((entry) => entry.job?.state === 'ready');
 
   async function retryAllFailed() {
     if (!online) { setError('New generation and queue actions require a connection to your laptop.'); return; }
@@ -169,7 +172,12 @@ export default function ChapterAudio({ book, sectionId, navigate, onStatus, rest
       <p>Open a chapter to use its existing retry/cancel controls. Failed and cancelled jobs are retained until explicitly retried.</p>
       {failedJobs.length > 0 && <button className="secondary" disabled={!online || bookBusy} onClick={() => void retryAllFailed()}>{bookBusy ? 'Retrying failed chapters…' : `Retry all failed chapters (${failedJobs.length})`}</button>}
       <p>Retrying resumes each failed chapter's remaining work through the existing per-chapter retry rules; completed chunks are kept. Chapters with unknown Voicebox outcomes are not resubmitted here — open those chapters and use their explicit confirmation.</p>
-      <div className="book-job-list">{book.sections.map((section, index) => <button className="secondary" key={section.id} onClick={() => navigate(section.id)}>{section.title} · {selectedJobs[index]?.state ?? 'missing'}</button>)}</div>
+      {activeEntries.length > 0 && <div className="book-job-list">{activeEntries.map(({ section, job }) => <button className="secondary" key={section.id} onClick={() => navigate(section.id)}>{section.title} · {job?.state ?? 'missing'}</button>)}</div>}
+      {completedEntries.length > 0 && <details className="completed-chapters">
+        <summary>Completed chapters ({completedEntries.length})</summary>
+        <div className="book-job-list">{completedEntries.map(({ section }) => <button className="secondary" key={section.id} onClick={() => navigate(section.id)}>{section.title} · ready</button>)}</div>
+      </details>}
+      {sectionEntries.length === 0 && <p role="status">No chapters found for this book.</p>}
       {bookResult && <p role="status">{bookResult}</p>}
       <p>{readyVersions.length} of {book.sections.length} chapters have ready audio; {book.sections.length - readyVersions.length} unavailable. Downloads choose the newest ready version of each chapter, across voices. Earlier device versions are retained.</p>
       <button disabled={!online || !readyVersions.length} onClick={() => { setError(''); void startBatch(book, jobs).catch((error) => setError(errorMessage(error))); }}>

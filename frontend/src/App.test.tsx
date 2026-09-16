@@ -116,6 +116,38 @@ it('reports chapters that could not be retried, including the ambiguous-submissi
   expect(host.textContent).toContain('unknown');
 });
 
+it('groups ready chapters under a collapsed disclosure while unfinished chapters stay visible', async () => {
+  const twoSectionBook = { ...book, section_count: 2, sections: [...book.sections, { id: 'section-2', title: 'Second chapter', position: 1, spine_position: 1 }] };
+  fetchMock.mockReset().mockImplementation((url: string, options?: RequestInit) => {
+    let value: unknown;
+    if (url === '/api/books/book') value = twoSectionBook;
+    else if (url.endsWith('/sections/section-2')) value = { ...twoSectionBook.sections[1], blocks };
+    else return baseMock(url, options);
+    return { ok: true, json: async () => value };
+  });
+  jobs = [
+    { ...baseJob, id: 'f1', section_id: 'section', state: 'failed', completed: 0, total: 2, error: 'synthetic failure' },
+    { ...baseJob, id: 'r1', section_id: 'section-2', state: 'ready', completed: 2, total: 2, audio_url: '/api/chapter-audio/ready' },
+  ] as unknown as typeof jobs;
+  await mount(); await navigate('#book=book');
+  await click(host.querySelector('.book-audio-actions > summary')!);
+  const list = host.querySelector('.book-job-list')!;
+  expect(list.textContent).toContain('failed');
+  expect(list.textContent).not.toContain('Second chapter');
+  const completed = host.querySelector('.completed-chapters')!;
+  expect(completed).toBeTruthy();
+  expect(completed.getAttribute('open')).toBeNull();
+  expect(completed.querySelector('summary')!.textContent).toContain('Completed chapters (1)');
+  expect(completed.textContent).toContain('Second chapter');
+});
+it('shows only the collapsed completed group when every chapter is ready', async () => {
+  jobs = [{ ...baseJob, id: 'r1', section_id: 'section', state: 'ready', completed: 2, total: 2, audio_url: '/api/chapter-audio/ready' }] as unknown as typeof jobs;
+  await mount(); await navigate('#book=book');
+  await click(host.querySelector('.book-audio-actions > summary')!);
+  expect(host.querySelector('.completed-chapters')!.textContent).toContain('Completed chapters (1)');
+  expect(host.textContent).not.toMatch(/No chapters found/);
+});
+
 it('restores one cached chapter player with Voicebox offline and retains it across real app navigation', async () => {
   offline = true; jobs = [{ ...baseJob, state: 'ready', completed: 2, audio_url: '/api/chapter-audio/saved', duration: 120 }];
   progress = { version_id: baseJob.id, section_id: 'section', offset: 23, speed: 1.5 };
