@@ -32,6 +32,33 @@ beforeEach(() => {
   host = document.createElement('div'); document.body.append(host); root = createRoot(host);
 });
 afterEach(async () => { await act(async () => root.unmount()); host.remove(); vi.restoreAllMocks(); vi.unstubAllGlobals(); });
+it('lists server-ready chapters when reachable and falls back to device downloads when the server is unreachable', async () => {
+  vi.useFakeTimers();
+  try {
+  const serverVersion = { ...version, id: 'v3', section_id: 'b', audio_url: '/api/chapter-audio/audio3' };
+  fetchMock.mockImplementation(async (url) => ({ ok: true, json: async () => url.includes('chapters?') ? [version, nextVersion, serverVersion] : null }));
+  await load(); await act(async () => {});
+  const select = host.querySelector<HTMLSelectElement>('select[aria-label="Chapters for playing book"]')!;
+  const options = Array.from(select.options).map((option) => option.textContent);
+  expect(options).toEqual(['First', 'Second', 'Second']);
+  await act(async () => { select.value = serverVersion.id; select.dispatchEvent(new Event('change', { bubbles: true })); });
+  await act(async () => {});
+  expect(player().getAttribute('src')).toBe(serverVersion.audio_url);
+  // Server unreachable: only device downloads remain (none exist in this jsdom run).
+  fetchMock.mockRejectedValue(new TypeError('offline'));
+  await act(async () => { await vi.advanceTimersByTimeAsync(5500); });
+  const select2 = host.querySelector<HTMLSelectElement>('select[aria-label="Chapters for playing book"]')!;
+  expect(Array.from(select2.options).map((o) => o.textContent)).toEqual(['Choose a chapter']);
+  } finally { vi.useRealTimers(); }
+});
+it('keeps the single audio element and active source while the server list refreshes', async () => {
+  fetchMock.mockImplementation(async (url) => ({ ok: true, json: async () => url.includes('chapters?') ? [version] : null }));
+  await load(); const audio = player();
+  await act(async () => { await new Promise((resolve) => setTimeout(resolve, 30)); });
+  expect(host.querySelector('audio')).toBe(audio);
+  expect(audio.getAttribute('src')).toBe(version.audio_url);
+  expect(host.querySelectorAll('audio')).toHaveLength(1);
+});
 it('keeps the same player and source across page navigation', async () => {
   await load(); const original = player(); await fire(original, 'play');
   await render('bookshelf'); await render('another book');
@@ -104,7 +131,7 @@ it('minimizes to a compact bar without touching the audio element and restores a
   expect(audio.paused).toBe(false); expect(audio.currentTime).toBe(42); expect(audio.playbackRate).toBe(1.5);
   expect(host.querySelector('.playback-dock')!.className).toContain('compact');
   expect((host.querySelector('#playback-controls') as HTMLElement)!.hidden).toBe(true);
-  for (const selector of ['select[aria-label="Downloaded chapters for playing book"]', 'select[aria-label="Playback speed"]', 'button[aria-label="Next audio chapter"]', 'button[aria-label="Previous audio chapter"]'])
+  for (const selector of ['select[aria-label="Chapters for playing book"]', 'select[aria-label="Playback speed"]', 'button[aria-label="Next audio chapter"]', 'button[aria-label="Previous audio chapter"]'])
     expect((host.querySelector(selector)!.closest('#playback-controls') as HTMLElement)!.hidden).toBe(true);
   expect(pauseMock).not.toHaveBeenCalled(); expect(playMock).not.toHaveBeenCalled(); expect(audio.getAttribute('src')).toBe(src);
   button = await sizeButton(); expect(button.textContent).toBe('Expand'); expect(button.getAttribute('aria-expanded')).toBe('false');

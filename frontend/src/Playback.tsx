@@ -156,8 +156,30 @@ export default function PlaybackProvider({ children }: { children: ReactNode }) 
   const playingBook = track?.chapter.book;
   const playingSection = playingBook?.sections.find((s) => s.id === track?.chapter.version.section_id);
   const chapterLabel = `Chapter ${(playingBook?.sections.findIndex((s) => s.id === playingSection?.id) ?? -1) + 1}: ${playingSection?.title ?? 'Chapter'}`;
-  const choices = downloads.filter((item) => item.state === 'ready' && item.book.id === playingBook?.id)
+  const [serverJobs, setServerJobs] = useState<ChapterVersion[] | null>(null);
+  useEffect(() => {
+    if (!playingBook) return;
+    const controller = new AbortController();
+    let timer: number;
+    async function poll() {
+      try {
+        const result = await api<ChapterVersion[]>(`/chapters?book_id=${playingBook!.id}`, { signal: controller.signal });
+        if (!controller.signal.aborted) setServerJobs(result);
+      } catch { if (!controller.signal.aborted) setServerJobs(null); } // Unreachable server: the selector falls back to device downloads.
+      if (!controller.signal.aborted) timer = window.setTimeout(() => void poll(), 5000);
+    }
+    void poll();
+    return () => { controller.abort(); window.clearTimeout(timer); };
+  }, [playingBook?.id]);
+  // Device downloads remain the offline tier; the server list adds every ready generated version.
+  const deviceChoices = downloads.filter((item) => item.state === 'ready' && item.book.id === playingBook?.id)
     .sort((a, b) => (playingBook?.sections.findIndex((s) => s.id === a.version.section_id) ?? 0) - (playingBook?.sections.findIndex((s) => s.id === b.version.section_id) ?? 0) || a.id.localeCompare(b.id));
+  const choiceSections = new Map(deviceChoices.map((item) => [item.version.section_id, item]));
+  const serverChoices = (serverJobs ?? []).filter((job) => job.state === 'ready' && job.audio_url && playingBook?.sections.some((s) => s.id === job.section_id))
+    .filter((job) => { const local = choiceSections.get(job.section_id); return !local || local.version.id === job.id; });
+  const choices = [...deviceChoices.map((item) => ({ id: item.version.id, section_id: item.version.section_id, book: item.book, version: item.version, device: true })),
+    ...serverChoices.map((job) => ({ id: job.id, section_id: job.section_id, book: playingBook!, version: job, device: false }))]
+    .sort((a, b) => (playingBook?.sections.findIndex((s) => s.id === a.section_id) ?? 0) - (playingBook?.sections.findIndex((s) => s.id === b.section_id) ?? 0) || a.id.localeCompare(b.id));
 
   return <Context.Provider value={{ track, load, loadChapter }}>{children}
     {!track && notice && <p className="error" role="alert">{notice}</p>}
@@ -171,14 +193,14 @@ export default function PlaybackProvider({ children }: { children: ReactNode }) 
           {!compact && <a href={track.device ? `#download=${track.id}` : `#book=${track.chapter.book.id}&section=${track.chapter.version.section_id}`}>Open chapter</a>}
         </div>
         <div id="playback-controls" hidden={compact}>
-        <label className="download-selector">Downloaded chapters
-          <select aria-label="Downloaded chapters for playing book" value={choices.some((item) => item.id === track.id) ? track.id : ''} onChange={(e) => {
+        <label className="download-selector">Chapters for playing book
+          <select aria-label="Chapters for playing book" value={choices.some((item) => item.id === track.id) ? track.id : ''} onChange={(e) => {
             const choice = choices.find((item) => item.id === e.target.value);
-            if (choice) void loadChapter(choice.book, choice.version, true);
+            if (choice) void loadChapter(choice.book, choice.version, choice.device);
           }}>
-            {!choices.some((item) => item.id === track.id) && <option value="">Choose a downloaded chapter</option>}
+            {!choices.some((item) => item.id === track.id) && <option value="">Choose a chapter</option>}
             {choices.map((item) => <option key={item.id} value={item.id}>
-              {item.section?.title}
+              {playingBook?.sections.find((s) => s.id === item.section_id)?.title ?? item.section_id}{item.device ? ' · on device' : ''}
             </option>)}
           </select>
         </label>
